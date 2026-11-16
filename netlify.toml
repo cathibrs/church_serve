@@ -1,0 +1,30 @@
+# Publicação no Netlify. O site (React) e a API (/api/*, Netlify Functions) ficam em app/web.
+[build]
+  base = "app/web"
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "24"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+# "netlify dev" (na raiz do projeto) sobe o Vite e a API juntos em http://localhost:8888
+[dev]
+  command = "node app/web/node_modules/vite/bin/vite.js app/web"
+  targetPort = 5173
+  port = 8888
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

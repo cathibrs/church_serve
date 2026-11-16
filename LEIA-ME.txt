@@ -1,0 +1,75 @@
+ESCALA DA IGREJA (versão web)
+=============================
+
+O sistema agora é um site. Não precisa mais do EscalaIgreja.exe nem da planilha:
+os voluntários, as escalas e as faltas ficam guardados na nuvem, e várias pessoas
+podem usar ao mesmo tempo, de qualquer computador ou celular.
+
+COMO ENTRAR
+1. Abra o endereço do site (quem publicou o sistema informa o link).
+2. Na primeira vez, clique em "Criar conta", informe seu nome, seu e-mail e uma senha
+   de pelo menos 8 caracteres. Você recebe um código de 6 números por e-mail (confira
+   a caixa de spam); digite o código para confirmar.
+3. Nas próximas vezes, é só "Entrar" com e-mail e senha.
+4. Só entram os e-mails liberados pela liderança. Se aparecer "Sem acesso", peça a
+   liberação do seu e-mail.
+5. Esqueceu a senha? Clique em "Esqueci a senha" e siga o código enviado por e-mail.
+6. Para sair, use "Sair" no menu lateral.
+
+COMO USAR
+1. Em "Escala", confira a data e a equipe. A equipe sugerida é a última usada naquele dia.
+2. Em "Presença", clique no nome de quem faltou. Embaixo aparece o campo "Motivo da falta"
+   (opcional); o motivo fica no histórico (passe o mouse no número de faltas).
+3. Clique em "Gerar escala". A escala já é salva na hora.
+4. Para trocar alguém, clique no nome no mapa ou na ficha e escolha outra pessoa.
+   - A lista mostra primeiro quem está livre.
+   - Escolher alguém que já tem função faz a troca entre os dois.
+   - Cada troca é salva sozinha ("Salvo às ..." embaixo do título).
+5. Qualquer posição pode ser ligada ou desligada:
+   - clique numa posição apagada para ativar;
+   - use "Desativar posição" na lista de pessoas;
+   - ou use o botão "Posições". "Usar como padrão" guarda a escolha para os próximos cultos.
+6. Em "Exportar": baixar o mapa ou a ficha em PNG, ou imprimir.
+7. O menu lateral pode ser recolhido (botão "Recolher menu" ou Ctrl+B) para o mapa ficar maior.
+
+VOLUNTÁRIOS
+- No cadastro há o campo "Observações" (ex.: só pode até as 10h). Quem tem observação
+  aparece com um ícone na presença e na lista de troca.
+- Voluntários novos são cadastrados na tela "Voluntários" (não mais na planilha).
+
+REGRAS DA ESCALA
+- Ninguém fica de fora: todo presente fica no mapa ou na recepção (a recepção conta
+  como mapa). A recepção tem 30 vagas; as vagas 21 a 30 são ligadas sozinhas quando precisa.
+- Ordem de preenchimento: mapa (corredores, banheiros, berçário, galerias), depois a
+  recepção com todos que sobraram, depois entradas e por último saídas.
+- Só quem está no mapa (fora a recepção e os banheiros fixos BM/BF) faz entrada.
+  Com o mapa padrão (21 lugares) sobram vagas de cadeiras; para preencher, ative mais
+  posições no mapa.
+- Rotatividade: quem estava na recepção vai para o mapa, ninguém repete a posição
+  do último culto, e cada função vai para quem fez menos vezes.
+- Gênero: banheiros e berçário respeitam o gênero; a cozinha fica com um só gênero;
+  a limpeza do altar usa um só gênero, alternando a cada culto.
+- Cada pessoa faz no máximo 1 tarefa de entrada e no máximo 1 tarefa de saída.
+  As saídas vão primeiro para quem ainda não tem tarefa.
+- A recepção nunca fica nas entradas, só nas saídas.
+- No último domingo do mês, quem está na recepção fica só na recepção.
+- Limpeza do altar: sempre 4 pessoas.
+- Limpeza do confete: no máximo 8 pessoas.
+- Se uma troca manual quebrar alguma regra, a posição fica em vermelho com a explicação.
+
+O QUE MUDOU
+- A planilha "POSICIONAMENTO E TAREFAS" não é mais usada no dia a dia. Ela serviu só
+  para levar os dados para o site, uma única vez.
+- O sistema não gera mais a planilha de cada culto. Use o mapa/ficha em PNG ou a impressão.
+- A marcação "Falta = Sim" na planilha deixou de existir: as faltas são marcadas na tela.
+
+ARQUIVOS ANTIGOS NESTA PASTA (cópia de segurança; o site não usa)
+- EscalaIgreja.exe e EscalaIgreja_antigo.exe     programa de Windows anterior
+- POSICIONAMENTO E TAREFAS.xlsx                   planilha usada na carga inicial
+- data\igreja_escala.db                           banco do programa anterior
+- exports\                                        planilhas geradas pelo programa anterior
+Guarde esses arquivos até confirmar que o histórico no site está completo.
+
+CÓDIGO-FONTE E PUBLICAÇÃO: veja app\web\README.md
+  app\web          site (React), API (Netlify Functions), banco (Neon) e carga inicial
+  app\escala       programa antigo em Python (só referência)

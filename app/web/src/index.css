@@ -1,0 +1,105 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "@fontsource-variable/inter";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Tokens no padrão shadcn / Origin UI — identidade Lagoinha (preto e branco) */
+:root {
+  --radius: 0.625rem;
+  --background: oklch(0.985 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.145 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.967 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.967 0 0);
+  --muted-foreground: oklch(0.44 0 0);
+  --accent: oklch(0.955 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-soft: oklch(0.97 0.02 25);
+  --warning: oklch(0.75 0.15 75);
+  --warning-soft: oklch(0.975 0.04 90);
+  --success: oklch(0.6 0.13 155);
+  --success-soft: oklch(0.97 0.03 155);
+  --border: oklch(0.9 0 0);
+  --input: oklch(0.87 0 0);
+  --ring: oklch(0.6 0 0);
+  --sidebar: oklch(0 0 0);
+  --sidebar-foreground: oklch(0.86 0 0);
+  --sidebar-accent: oklch(0.2 0 0);
+  --sidebar-border: oklch(0.22 0 0);
+}
+
+@theme inline {
+  --font-sans: "Inter Variable", "Segoe UI", system-ui, sans-serif;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-soft: var(--destructive-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-border: var(--sidebar-border);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * { @apply border-border outline-ring/50; }
+  html, body, #root { height: 100%; }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv11", "ss01";
+    font-size: 14px;
+  }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: oklch(0.85 0 0); border-radius: 999px; border: 3px solid transparent; background-clip: content-box; }
+  ::-webkit-scrollbar-thumb:hover { background-color: oklch(0.7 0 0); }
+}
+
+/* Mapa SVG */
+.map-svg .slot { cursor: pointer; }
+.map-svg .slot:hover .hit { fill: oklch(0.145 0 0 / 0.06); }
+.map-svg .slot:hover .nm, .map-svg .slot:hover .rn { fill: oklch(0.35 0 0); }
+
+@media print {
+  @page { size: A4 landscape; margin: 8mm; }
+  .no-print { display: none !important; }
+  body { background: #fff; }
+  .print-break { break-before: page; }
+}
+
+/* Grupos do seletor de pessoas (cmdk) */
+[cmdk-group-heading] {
+  padding: 8px 8px 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted-foreground);
+}

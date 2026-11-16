@@ -1,0 +1,25 @@
+# Dados pessoais e arquivos do programa antigo: nunca vão para o repositório.
+data/
+exports/
+*.xlsx
+*.db
+*.exe
+/081914D0
+/251514D0
+
+# Segredos
+.env
+.env.*
+!.env.example
+
+# Dependências e arquivos gerados
+node_modules/
+app/web/dist/
+app/static/
+app/.venv-build/
+app/build/
+app/dist/
+app/seed_build/
+__pycache__/
+*.pyc
+.netlify/
