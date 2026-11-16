@@ -52,6 +52,9 @@ npm run import -- --db ../../data/igreja_escala.db --xlsx "../../POSICIONAMENTO 
 npm run import -- --db ../../data/igreja_escala.db --xlsx "../../POSICIONAMENTO E TAREFAS.xlsx"
 ```
 
+Da raiz do projeto o mesmo comando funciona, com os caminhos a partir dela:
+`npm run import -- --db data/igreja_escala.db --xlsx "POSICIONAMENTO E TAREFAS.xlsx"`.
+
 O comando mostra quantas linhas leu e quantas gravou em cada tabela. O que ele faz:
 
 - copia do banco antigo os voluntários (com inativos, permissões e observações), as escalas, os

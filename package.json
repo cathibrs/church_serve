@@ -1,0 +1,17 @@
+{
+  "name": "church-serve",
+  "private": true,
+  "description": "Atalhos para rodar, da raiz, os comandos do site que fica em app/web.",
+  "scripts": {
+    "postinstall": "npm --prefix app/web install",
+    "dev": "netlify dev",
+    "build": "npm --prefix app/web run build",
+    "test": "npm --prefix app/web run test",
+    "typecheck": "npm --prefix app/web run typecheck",
+    "import": "npm --prefix app/web run import --"
+  },
+  "dependencies": {
+    "@neon/config": "^1.14.1",
+    "@neon/env": "^2.1.4"
+  }
+}

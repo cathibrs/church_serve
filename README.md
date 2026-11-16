@@ -36,9 +36,11 @@ Criar uma conta com outro e-mail não dá acesso a nenhum dado.
 
 Precisa de Node 24.
 
+O site fica em `app/web`. Os comandos abaixo funcionam na raiz do projeto (ela só repassa para
+`app/web`) e também dentro de `app/web`.
+
 ```bash
-cd app/web
-npm install
+npm install       # instala também as dependências de app/web
 npm test          # regras da escala, API e importação (não precisa de internet)
 npm run build
 ```

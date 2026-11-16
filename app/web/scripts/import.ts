@@ -58,6 +58,17 @@ async function connect(dryRun: boolean): Promise<Sql> {
   return neon(url) as unknown as Sql;
 }
 
+/**
+ * Acha o arquivo a partir da pasta onde o comando foi digitado (INIT_CWD, que o npm informa)
+ * ou desta pasta (app/web). Assim o comando funciona da raiz do projeto e de app/web.
+ */
+function locate(file: string): string {
+  const bases = [process.env.INIT_CWD, process.cwd()].filter((b): b is string => Boolean(b));
+  const found = bases.map((base) => resolve(base, file)).find((path) => existsSync(path));
+  if (!found) throw new Error(`Arquivo não encontrado: ${file} (procurei em ${[...new Set(bases)].join(" e ")})`);
+  return found;
+}
+
 async function main() {
   const { values } = parseArgs({
     options: {
@@ -68,9 +79,8 @@ async function main() {
     },
   });
   if (!values.db && !values.xlsx) throw new Error("Informe --db e/ou --xlsx. Veja o início de scripts/import.ts.");
-  for (const file of [values.db, values.xlsx]) {
-    if (file && !existsSync(file)) throw new Error(`Arquivo não encontrado: ${resolve(file)}`);
-  }
+  values.db &&= locate(values.db);
+  values.xlsx &&= locate(values.xlsx);
 
   const source = values.db ? await readSqlite(values.db) : null;
   const sheet = values.xlsx ? await readSheetRows(values.xlsx) : [];
