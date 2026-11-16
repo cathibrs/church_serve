@@ -69,8 +69,10 @@ O comando mostra quantas linhas leu e quantas gravou em cada tabela. O que ele f
 
 1. Crie o site apontando para este repositório (ou use `netlify deploy --build --prod` na raiz).
    O `netlify.toml` já informa a pasta, o comando de build e as funções.
-2. Em **Site configuration > Environment variables**, cadastre `DATABASE_URL`, `NEON_AUTH_BASE_URL`,
-   `NEON_AUTH_JWKS_URL` e `ALLOWED_EMAILS` (os valores estão no seu `.env.local`).
+2. Em **Project configuration > Environment variables**, cadastre `DATABASE_URL`, `NEON_AUTH_BASE_URL`,
+   `NEON_AUTH_JWKS_URL` e `ALLOWED_EMAILS` (os valores estão no seu `.env.local`). Só a API usa essas
+   variáveis: nenhuma é embutida no site durante o build. A página pede o endereço do login à API
+   (`/api/config`) quando abre.
 3. Libere o endereço do site no login do Neon; sem isso o login responde `invalid domain`:
    `neon neon-auth domain add https://seu-site.netlify.app`
 4. Publique de novo depois de mudar variáveis: elas só valem a partir da publicação seguinte.

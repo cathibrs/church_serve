@@ -78,6 +78,14 @@ describe("acesso", () => {
     expect((await call("/api/volunteers")).data.volunteers.some((v: any) => v.name === "Intruso")).toBe(false);
   });
 
+  it("endereço do login é público e não traz nenhum dado", async () => {
+    process.env.NEON_AUTH_BASE_URL = "https://auth.exemplo/neondb/auth";
+    const r = await call("/api/config", undefined, null);
+    expect(r).toEqual({ status: 200, data: { auth_url: "https://auth.exemplo/neondb/auth" } });
+    delete process.env.NEON_AUTH_BASE_URL;
+    expect((await call("/api/config", undefined, null)).data).toEqual({ auth_url: null });
+  });
+
   it("rota que não existe: 404", async () => {
     expect((await call("/api/quit", {})).status).toBe(404);
   });

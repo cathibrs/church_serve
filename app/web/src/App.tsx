@@ -21,14 +21,24 @@ const Loading = () => (
 );
 
 /** Porta de entrada: só mostra o sistema para quem está logado com e-mail confirmado. */
-export default function App() {
+export default function App({ serverDown = false }: { serverDown?: boolean }) {
   const session = authClient.useSession();
   const user = session.data?.user;
 
+  if (serverDown)
+    return (
+      <AccessNotice
+        title="Não foi possível falar com o servidor"
+        action={<Button onClick={() => location.reload()}>Tentar de novo</Button>}
+      >
+        Verifique a conexão e recarregue a página.
+      </AccessNotice>
+    );
   if (!authConfigured)
     return (
       <AccessNotice title="Login não configurado">
-        Falta a variável <code>VITE_NEON_AUTH_URL</code> na publicação do site. Veja o arquivo README em app/web.
+        Falta a variável <code>NEON_AUTH_BASE_URL</code> no servidor. No Netlify, cadastre-a em Project
+        configuration &gt; Environment variables e publique o site de novo.
       </AccessNotice>
     );
   if (session.isPending) return <Loading />;

@@ -20,18 +20,21 @@ export interface Sql {
   transaction(queries: Query[]): Promise<Row[][]>;
 }
 
+/** Erro que pode ser mostrado ao usuário como está. */
+export class UserError extends Error {}
+
+/** Falta configuração no servidor (variável de ambiente). A mensagem diz qual, sem expor valores. */
+export class ConfigError extends Error {}
+
 let cached: Sql | null = null;
 
 export function connect(): Sql {
   if (cached) return cached;
   const url = process.env.DATABASE_URL || process.env.NETLIFY_DATABASE_URL;
-  if (!url) throw new Error("Banco não configurado: falta a variável DATABASE_URL.");
+  if (!url) throw new ConfigError("Servidor sem banco configurado: falta a variável DATABASE_URL.");
   cached = neon(url) as unknown as Sql;
   return cached;
 }
-
-/** Erro que pode ser mostrado ao usuário como está. */
-export class UserError extends Error {}
 
 // ---------------------------------------------------------------- texto
 

@@ -2,10 +2,6 @@
 import { createAuthClient } from "@neon/auth";
 import { BetterAuthReactAdapter } from "@neon/auth/react/adapters";
 
-const url = import.meta.env.VITE_NEON_AUTH_URL as string | undefined;
-
-/** Falso quando o site foi publicado sem a variável VITE_NEON_AUTH_URL. */
-export const authConfigured = Boolean(url);
 
 export interface AuthResult<T> {
   data: T | null;
@@ -32,11 +28,24 @@ interface PluginMethods {
   };
 }
 
-const client = createAuthClient(url || `${location.origin}/login-nao-configurado`, {
-  adapter: BetterAuthReactAdapter(),
-});
+const makeClient = (url: string) => createAuthClient(url, { adapter: BetterAuthReactAdapter() });
 
-export const authClient = client as typeof client & PluginMethods;
+type AuthClient = ReturnType<typeof makeClient> & PluginMethods;
+
+/** Cliente do login. Só existe depois de initAuth(), chamado em main.tsx antes de desenhar a tela. */
+export let authClient: AuthClient;
+
+/** Falso quando o servidor não tem a variável NEON_AUTH_BASE_URL. */
+export let authConfigured = false;
+
+/**
+ * Cria o cliente com o endereço que a API informa em /api/config (variável NEON_AUTH_BASE_URL
+ * do servidor). O endereço não é embutido no site durante o build.
+ */
+export function initAuth(url: string | null) {
+  authConfigured = Boolean(url);
+  authClient = makeClient(url || `${location.origin}/login-nao-configurado`) as AuthClient;
+}
 
 // ---------------------------------------------------------------- token para a API
 

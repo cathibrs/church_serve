@@ -312,6 +312,10 @@ export async function handle(request: Request, opts: HandleOptions = {}): Promis
   try {
     const get = request.method === "GET" ? GET_ROUTES[path] : undefined;
     const post = request.method === "POST" ? POST_ROUTES[path] : undefined;
+    // Pública: o navegador precisa do endereço do login antes de existir sessão.
+    if (request.method === "GET" && path === "/api/config") {
+      return json({ auth_url: process.env.NEON_AUTH_BASE_URL || null });
+    }
     if (!get && !post) return json({ error: "rota inválida" }, 404);
 
     const sql = opts.sql ?? db.connect();
@@ -329,6 +333,7 @@ export async function handle(request: Request, opts: HandleOptions = {}): Promis
   } catch (e) {
     if (e instanceof HttpError) return json({ error: e.message, code: e.code }, e.status);
     if (e instanceof UserError) return json({ error: e.message }, 400);
+    if (e instanceof db.ConfigError) return json({ error: e.message }, 500);
     console.error(e);
     return json({ error: "Erro interno. Tente de novo em instantes." }, 500);
   }

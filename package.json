@@ -3,7 +3,7 @@
   "private": true,
   "description": "Atalhos para rodar, da raiz, os comandos do site que fica em app/web.",
   "scripts": {
-    "postinstall": "npm --prefix app/web install",
+    "setup": "npm --prefix app/web install",
     "dev": "netlify dev",
     "build": "npm --prefix app/web run build",
     "test": "npm --prefix app/web run test",

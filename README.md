@@ -40,7 +40,7 @@ O site fica em `app/web`. Os comandos abaixo funcionam na raiz do projeto (ela s
 `app/web`) e também dentro de `app/web`.
 
 ```bash
-npm install       # instala também as dependências de app/web
+npm run setup     # instala as dependências de app/web
 npm test          # regras da escala, API e importação (não precisa de internet)
 npm run build
 ```
