@@ -327,7 +327,7 @@ export async function handle(request: Request, opts: HandleOptions = {}): Promis
     if (typeof body !== "object" || body === null || Array.isArray(body)) return json({ error: "JSON inválido" }, 400);
     return json(await post!(sql, body as Body));
   } catch (e) {
-    if (e instanceof HttpError) return json({ error: e.message }, e.status);
+    if (e instanceof HttpError) return json({ error: e.message, code: e.code }, e.status);
     if (e instanceof UserError) return json({ error: e.message }, 400);
     console.error(e);
     return json({ error: "Erro interno. Tente de novo em instantes." }, 500);

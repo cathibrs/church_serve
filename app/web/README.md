@@ -22,13 +22,23 @@ onde está o `netlify.toml`.
 
 ### 1. Banco e login no Neon
 
-1. Crie um projeto no Neon na região **AWS US East (Ohio), `aws-us-east-2`**. É a região onde as
-   funções do Netlify rodam por padrão; banco e funções na mesma região deixam o sistema mais rápido.
-2. No projeto, abra **Auth** e ative. Em *Configuration*, ligue **Verify email at signup**
-   (confirmação do e-mail por código).
-3. Copie `.env.example` para `.env` e preencha com os valores do Console do Neon:
-   `DATABASE_URL` (conexão *pooled*), `NEON_AUTH_BASE_URL`, `NEON_AUTH_JWKS_URL` e `VITE_NEON_AUTH_URL`.
-4. Em `ALLOWED_EMAILS`, liste os e-mails de quem pode usar a escala.
+O projeto do Neon é descrito em `neon.ts` (Postgres + Auth) e administrado pela CLI:
+
+```bash
+npm i -g neon          # uma vez
+neon login             # abre o navegador
+neon link              # vincula esta pasta a um projeto (grava .neon)
+neon deploy            # cria o que neon.ts declara e grava as variáveis em .env.local
+```
+
+- Use a região **AWS US East (Ohio), `aws-us-east-2`**: é onde as funções do Netlify rodam por
+  padrão, e banco e funções na mesma região deixam o sistema mais rápido.
+- `neon deploy` e `neon env pull` gravam `DATABASE_URL`, `DATABASE_URL_UNPOOLED`,
+  `NEON_AUTH_BASE_URL` e `NEON_AUTH_JWKS_URL` em `.env.local` (modelo em `.env.example`).
+- Acrescente à mão, no mesmo arquivo, `ALLOWED_EMAILS` com os e-mails de quem pode usar a escala.
+  O `neon env pull` preserva essa linha.
+- O site exige e-mail confirmado por código mesmo que a opção *Verify email at signup* do Neon
+  esteja desligada (é o padrão): quem entra sem confirmar cai na tela do código.
 
 ### 2. Carga inicial dos dados
 
@@ -56,9 +66,10 @@ O comando mostra quantas linhas leu e quantas gravou em cada tabela. O que ele f
 
 1. Crie o site apontando para este repositório (ou use `netlify deploy --build --prod` na raiz).
    O `netlify.toml` já informa a pasta, o comando de build e as funções.
-2. Em **Site configuration > Environment variables**, cadastre as cinco variáveis do `.env`.
-3. No Neon, em **Auth > Domains**, adicione o endereço do site (ex.: `https://escala-lagoinha.netlify.app`).
-   Sem isso o login responde `invalid domain`.
+2. Em **Site configuration > Environment variables**, cadastre `DATABASE_URL`, `NEON_AUTH_BASE_URL`,
+   `NEON_AUTH_JWKS_URL` e `ALLOWED_EMAILS` (os valores estão no seu `.env.local`).
+3. Libere o endereço do site no login do Neon; sem isso o login responde `invalid domain`:
+   `neon neon-auth domain add https://seu-site.netlify.app`
 4. Publique de novo depois de mudar variáveis: elas só valem a partir da publicação seguinte.
 
 ### 4. Primeiro acesso
@@ -77,7 +88,7 @@ cair no spam. Para uso contínuo, o Neon recomenda configurar um SMTP próprio
 
 ```bash
 npm install -g netlify-cli   # uma vez
-npm run dev                  # site + API em http://localhost:8888 (usa o app/web/.env)
+npm run dev                  # site + API em http://localhost:8888 (usa o app/web/.env.local)
 npm test                     # regras da escala, API e importação
 npm run typecheck
 npm run build

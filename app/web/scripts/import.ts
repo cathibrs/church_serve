@@ -10,7 +10,7 @@
  *   --force            apaga o que já existe no Neon antes de importar
  *
  * Precisa de pelo menos um entre --db e --xlsx. A conexão vem de DATABASE_URL
- * (arquivo .env desta pasta). Nenhum nome de voluntário é mostrado na tela.
+ * (arquivo .env.local ou .env desta pasta). Nenhum nome de voluntário é mostrado na tela.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -47,9 +47,13 @@ async function connect(dryRun: boolean): Promise<Sql> {
     const { createTestDb } = await import("../server/testdb.ts");
     return (await createTestDb({ schema: false })).sql;
   }
-  if (existsSync(".env")) process.loadEnvFile(".env");
+  // .env.local é o arquivo que "neon env pull" / "neon deploy" gravam
+  for (const file of [".env.local", ".env"]) if (existsSync(file)) process.loadEnvFile(file);
   const url = process.env.DATABASE_URL_UNPOOLED || process.env.DATABASE_URL;
-  if (!url) throw new Error("Falta DATABASE_URL (coloque no arquivo .env desta pasta ou use --dry-run para ensaiar).");
+  if (!url) {
+    throw new Error("Falta DATABASE_URL (rode \"neon env pull\" nesta pasta ou use --dry-run para ensaiar).");
+  }
+  console.log(`Banco de destino: ${new URL(url).host}${process.env.NEON_BRANCH ? ` (branch ${process.env.NEON_BRANCH})` : ""}`);
   const { neon } = await import("@neondatabase/serverless");
   return neon(url) as unknown as Sql;
 }

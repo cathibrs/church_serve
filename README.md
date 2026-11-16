@@ -43,8 +43,8 @@ npm test          # regras da escala, API e importação (não precisa de intern
 npm run build
 ```
 
-Para abrir o site localmente com a API, é preciso um banco no Neon e o arquivo `app/web/.env`
-(modelo em [`app/web/.env.example`](app/web/.env.example)). Depois:
+Para abrir o site localmente com a API, é preciso um projeto no Neon e o arquivo
+`app/web/.env.local`, que `neon env pull` grava (modelo em [`app/web/.env.example`](app/web/.env.example)). Depois:
 
 ```bash
 npm install -g netlify-cli

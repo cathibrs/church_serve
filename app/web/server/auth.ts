@@ -13,12 +13,25 @@ import type { Sql } from "./db.ts";
 
 export class HttpError extends Error {
   readonly status: number;
+  readonly code: string | undefined;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code?: string) {
     super(message);
     this.status = status;
+    this.code = code;
   }
 }
+
+/**
+ * Toda recusa de acesso responde 401, com o motivo no campo `code`:
+ *   unauthenticated  sem token ou token vencido (o navegador tenta renovar e pede login)
+ *   unverified       conta com e-mail ainda não confirmado
+ *   forbidden        e-mail fora de ALLOWED_EMAILS
+ * Não se usa 403: no `netlify dev`, uma resposta 403 ou 404 faz o emulador repetir o pedido
+ * em caminhos alternativos (/api/x.html) e a mensagem original se perde.
+ */
+const denied = (code: "unauthenticated" | "unverified" | "forbidden", message: string) =>
+  new HttpError(401, message, code);
 
 export interface AuthUser {
   id: string;
@@ -76,28 +89,28 @@ export interface AuthOptions {
 
 export async function authenticate(request: Request, sql: Sql, opts: AuthOptions = {}): Promise<AuthUser> {
   const header = request.headers.get("authorization") ?? "";
-  if (!header.toLowerCase().startsWith("bearer ")) throw new HttpError(401, "Faça login para continuar.");
+  if (!header.toLowerCase().startsWith("bearer ")) throw denied("unauthenticated", "Faça login para continuar.");
   const verify = opts.verify ?? defaultVerifier();
   let payload: JWTPayload;
   try {
     payload = await verify(header.slice(7).trim());
   } catch {
-    throw new HttpError(401, "Sessão expirada. Faça login de novo.");
+    throw denied("unauthenticated", "Sessão expirada. Faça login de novo.");
   }
-  if (!payload.sub) throw new HttpError(401, "Sessão inválida. Faça login de novo.");
+  if (!payload.sub) throw denied("unauthenticated", "Sessão inválida. Faça login de novo.");
 
   let account: Account | null =
     typeof payload.email === "string" && typeof payload.emailVerified === "boolean"
       ? { email: payload.email, verified: payload.emailVerified }
       : null;
   account ??= await accountFromDb(sql, payload.sub);
-  if (!account) throw new HttpError(401, "Conta não encontrada. Faça login de novo.");
+  if (!account) throw denied("unauthenticated", "Conta não encontrada. Faça login de novo.");
 
   const email = account.email.trim().toLowerCase();
-  if (!account.verified) throw new HttpError(403, "Confirme seu e-mail para entrar.");
+  if (!account.verified) throw denied("unverified", "Confirme seu e-mail para entrar.");
   const allowed = opts.allowed ?? allowedEmails();
   if (!allowed.has(email)) {
-    throw new HttpError(403, `O e-mail ${email} não tem acesso à escala. Peça a liberação à liderança.`);
+    throw denied("forbidden", `O e-mail ${email} não tem acesso à escala. Peça a liberação à liderança.`);
   }
   return { id: payload.sub, email };
 }

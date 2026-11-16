@@ -110,13 +110,29 @@ export interface AbsenceItem {
   reason: string;
 }
 
-/** Erro da API com o status HTTP (401 = sem sessão, 403 = e-mail sem acesso). */
+/** Erro da API. `denied`: há sessão, mas a conta não tem acesso (e-mail não confirmado ou não liberado). */
 export class ApiError extends Error {
   readonly status: number;
+  readonly denied: boolean;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, denied = false) {
     super(message);
     this.status = status;
+    this.denied = denied;
+  }
+}
+
+interface ErrorBody {
+  error?: string;
+  /** motivo de um 401: unauthenticated, unverified ou forbidden (ver server/auth.ts) */
+  code?: string;
+}
+
+async function bodyOf(r: Response): Promise<ErrorBody | null> {
+  try {
+    return await r.json();
+  } catch {
+    return null; // resposta sem JSON (ex.: erro do provedor)
   }
 }
 
@@ -130,20 +146,19 @@ async function request<T>(path: string, body?: unknown): Promise<T> {
   let token = await getToken();
   if (!token) throw new ApiError(401, "Faça login para continuar.");
   let r = await send(path, body, token);
-  if (r.status === 401) {
+  let data = await bodyOf(r);
+  if (r.status === 401 && (!data?.code || data.code === "unauthenticated")) {
     // o token vale 15 minutos: tenta uma vez com um novo antes de desistir
     token = await getToken(true);
-    if (token) r = await send(path, body, token);
-  }
-  let data: { error?: string } | null = null;
-  try {
-    data = await r.json();
-  } catch {
-    /* resposta sem JSON (ex.: erro do provedor) */
+    if (token) {
+      r = await send(path, body, token);
+      data = await bodyOf(r);
+    }
   }
   if (!r.ok || !data || data.error) {
-    if (r.status === 401) clearToken();
-    throw new ApiError(r.status, data?.error || `Não foi possível falar com o servidor (${r.status}).`);
+    const denied = r.status === 401 && (data?.code === "forbidden" || data?.code === "unverified");
+    if (r.status === 401 && !denied) clearToken();
+    throw new ApiError(r.status, data?.error || `Não foi possível falar com o servidor (${r.status}).`, denied);
   }
   return data as T;
 }

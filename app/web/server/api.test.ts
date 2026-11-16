@@ -50,6 +50,7 @@ describe("acesso", () => {
   it("sem token: 401", async () => {
     const r = await call("/api/init", undefined, null);
     expect(r.status).toBe(401);
+    expect(r.data.code).toBe("unauthenticated");
     expect(r.data.error).toContain("login");
   });
 
@@ -57,21 +58,23 @@ describe("acesso", () => {
     expect((await call("/api/init", undefined, "ruim")).status).toBe(401);
   });
 
-  it("e-mail fora da lista: 403, mesmo com conta válida", async () => {
+  it("e-mail fora da lista: recusado, mesmo com conta válida", async () => {
     const r = await call("/api/volunteers", undefined, "curioso@gmail.com");
-    expect(r.status).toBe(403);
+    expect(r.status).toBe(401);
+    expect(r.data.code).toBe("forbidden");
     expect(r.data.volunteers).toBeUndefined();
   });
 
-  it("e-mail da lista ainda não verificado: 403", async () => {
+  it("e-mail da lista ainda não verificado: recusado", async () => {
     const r = await call("/api/init", undefined, `${LEADER}|nao`);
-    expect(r.status).toBe(403);
+    expect(r.status).toBe(401);
+    expect(r.data.code).toBe("unverified");
     expect(r.data.error).toContain("Confirme");
   });
 
   it("gravação também exige acesso", async () => {
     const r = await call("/api/volunteer", { name: "Intruso", gender: "Masculino" }, "curioso@gmail.com");
-    expect(r.status).toBe(403);
+    expect(r.data.code).toBe("forbidden");
     expect((await call("/api/volunteers")).data.volunteers.some((v: any) => v.name === "Intruso")).toBe(false);
   });
 

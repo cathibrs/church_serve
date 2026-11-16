@@ -76,7 +76,7 @@ function Shell({ email }: { email: string }) {
       .then((d) => alive && setInit(d))
       .catch((e) => {
         if (!alive) return;
-        if (e instanceof ApiError && e.status === 403) setDenied(e.message);
+        if (e instanceof ApiError && e.denied) setDenied(e.message);
         else if (e instanceof ApiError && e.status === 401) signOut().catch(() => {});
         else setFailed(e.message);
       });
