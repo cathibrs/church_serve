@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
-import { toast } from "sonner";
+import { useMemo, useState } from "react";
 import { motion } from "motion/react";
 import { CalendarCheck, ChevronRight, Search, TrendingDown, UserX, Users } from "lucide-react";
-import { api, type AbsenceItem, type HistoryRow, type Me, type ScheduleRow } from "@/lib/api";
+import type { AbsenceItem, Me } from "@/lib/api";
+import type { Route, ScreenData } from "@/lib/screens";
 import { br, cn, normalize, teamLabel } from "@/lib/utils";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -33,30 +33,24 @@ const POS_COLS = [
 ];
 const COLS = [...TASKS, ...POS_COLS];
 
-export function HistoricoPage({ me, onOpen }: { me: Me; onOpen: (date: string, team: string) => void }) {
-  const [team, setTeam] = useState("all");
-  const [people, setPeople] = useState<HistoryRow[]>([]); // só voluntários ativos
-  const [sched, setSched] = useState<ScheduleRow[]>([]);
-  const [loaded, setLoaded] = useState(false);
+/**
+ * Histórico e faltas. Os dados chegam prontos; a equipe do filtro fica no endereço
+ * (/historico/:equipe), e os indicadores são contas feitas aqui sobre os dois recursos.
+ */
+export function HistoricoPage({
+  me,
+  team,
+  data: { people, schedules: sched }, // `people`: só voluntários ativos
+  onOpen,
+}: {
+  me: Me;
+  /** equipe do filtro (sem ela: todas) */
+  team?: string;
+  data: ScreenData["historico"];
+  onOpen: (route: Route) => void;
+}) {
   const [q, setQ] = useState("");
   const [onlyAbs, setOnlyAbs] = useState(false);
-
-  useEffect(() => {
-    let alive = true;
-    const filter = team === "all" ? undefined : team;
-    // os dois recursos são pedidos juntos; os indicadores são contas feitas aqui sobre eles
-    Promise.all([api.history(filter), api.schedules(filter)])
-      .then(([h, s]) => {
-        if (!alive) return;
-        setPeople(h);
-        setSched(s);
-        setLoaded(true);
-      })
-      .catch((e) => toast.error(e.message));
-    return () => {
-      alive = false;
-    };
-  }, [team]);
 
   const rows = useMemo(() => {
     const nq = normalize(q);
@@ -73,15 +67,13 @@ export function HistoricoPage({ me, onOpen }: { me: Me; onOpen: (date: string, t
   }, [rows]);
 
   const totalAbs = sched.reduce((sum, s) => sum + s.faltas, 0);
-  const k = loaded
-    ? {
-        escalas: sched.length,
-        faltas: totalAbs,
-        media_faltas: sched.length ? Math.round((totalAbs / sched.length) * 10) / 10 : 0,
-        ativos: people.length,
-        com_faltas: ranking.length,
-      }
-    : undefined;
+  const k = {
+    escalas: sched.length,
+    faltas: totalAbs,
+    media_faltas: sched.length ? Math.round((totalAbs / sched.length) * 10) / 10 : 0,
+    ativos: people.length,
+    com_faltas: ranking.length,
+  };
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex flex-wrap items-center gap-2 border-b bg-background/85 px-5 py-2.5 backdrop-blur">
@@ -89,7 +81,7 @@ export function HistoricoPage({ me, onOpen }: { me: Me; onOpen: (date: string, t
           <h1 className="text-[15px] leading-tight font-semibold">Histórico e faltas</h1>
           <p className="text-xs text-muted-foreground">Quem serviu em quê, quantas vezes, e quem mais falta.</p>
         </div>
-        <Select value={team} onValueChange={setTeam}>
+        <Select value={team ?? "all"} onValueChange={(t) => onOpen({ page: "historico", team: t === "all" ? undefined : t })}>
           <SelectTrigger className="w-[210px]">
             <Users className="size-4 text-muted-foreground" />
             <SelectValue />
@@ -163,7 +155,7 @@ export function HistoricoPage({ me, onOpen }: { me: Me; onOpen: (date: string, t
                   {sched.map((s) => (
                     <tr
                       key={s.id}
-                      onClick={() => s.team && onOpen(s.service_date, s.team)}
+                      onClick={() => s.team && onOpen({ page: "escala", date: s.service_date, team: s.team })}
                       className="group h-7 cursor-pointer border-t hover:bg-muted/50"
                     >
                       <td className="pl-3 tabular-nums">

@@ -168,7 +168,7 @@ export function LoginPage({
     <div className="flex h-full items-center justify-center overflow-auto bg-sidebar p-4">
       <div className="w-full max-w-sm">
         <div className="mb-5 flex flex-col items-center">
-          <img src="./logo.png" alt="Lagoinha Jundiaí" className="w-36 mix-blend-screen select-none" draggable={false} />
+          <img src="/logo.png" alt="Lagoinha Jundiaí" className="w-36 mix-blend-screen select-none" draggable={false} />
           <div className="mt-1 text-[11px] font-semibold tracking-[0.22em] text-white/70 uppercase">
             Escala de voluntários
           </div>

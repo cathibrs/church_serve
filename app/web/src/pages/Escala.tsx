@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Route } from "@/lib/screens";
 import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
 import {
@@ -58,106 +59,86 @@ type SaveState =
   | { kind: "saved"; at: string }
   | { kind: "error"; msg: string };
 
-function nextService(todayIso: string) {
-  const t = new Date(todayIso + "T12:00:00");
-  const dow = t.getDay();
-  if (dow !== 0 && dow !== 3) t.setDate(t.getDate() + ((7 - dow) % 7));
-  return t.toISOString().slice(0, 10);
+/** Estado inicial da tela a partir da folha: presença, posições ligadas e quem está em cada posição. */
+function fromSheet(data: Sheet) {
+  const activeIds = data.volunteers.filter((v) => v.active).map((v) => v.id);
+  const assign: Record<string, number> = {};
+  if (!data.saved) {
+    return { present: new Set(activeIds), reasons: {} as Record<number, string>, active: new Set(data.default_active), assign };
+  }
+  const absent = new Set(data.saved.absent_ids);
+  const active = new Set(data.saved.active_codes ?? data.default_active);
+  data.saved.assignments.forEach((a) => {
+    if (positions[a.position_code]) {
+      assign[a.position_code] = a.volunteer_id;
+      active.add(a.position_code);
+    }
+  });
+  return {
+    present: new Set(activeIds.filter((id) => !absent.has(id))),
+    reasons: Object.fromEntries(
+      Object.entries(data.saved.absent_reasons ?? {}).map(([k, v]) => [Number(k), v]),
+    ) as Record<number, string>,
+    active,
+    assign,
+  };
 }
 
+/**
+ * Tela da escala de um culto. A folha (`sheet`) chega pronta, então a tela já nasce
+ * preenchida; trocar de data ou de equipe abre outro endereço, que traz outra folha.
+ */
 export function EscalaPage({
   me,
-  goto,
-  onGotoDone,
+  route,
+  sheet: day,
+  onOpen,
 }: {
   me: Me;
-  goto: { date: string; team: string } | null;
-  onGotoDone: () => void;
+  /** endereço aberto: sem equipe, a API escolheu a sugerida para o dia */
+  route: Extract<Route, { page: "escala" }>;
+  sheet: Sheet;
+  onOpen: (route: Route) => void;
 }) {
-  const [defaults, setDefaults] = useState<string[]>(FACTORY_ACTIVE);
-
-  const [date, setDate] = useState(() => nextService(me.today));
-  const [team, setTeam] = useState<string | null>(null); // null = sugestão automática
-  const [day, setDay] = useState<Sheet | null>(null);
-  const [present, setPresent] = useState<Set<number>>(new Set());
-  const [reasons, setReasons] = useState<Record<number, string>>({}); // motivo da falta
-  const [active, setActive] = useState<Set<string>>(new Set(FACTORY_ACTIVE));
-  const [assign, setAssign] = useState<Record<string, number>>({});
-  const [issues, setIssues] = useState<Issue[]>([]);
+  const [start] = useState(() => fromSheet(day));
+  const [defaults, setDefaults] = useState<string[]>(day.default_active); // o padrão de posições é de cada equipe
+  const [date, setDate] = useState(day.date);
+  const [present, setPresent] = useState<Set<number>>(start.present);
+  const [reasons, setReasons] = useState<Record<number, string>>(start.reasons); // motivo da falta
+  const [active, setActive] = useState<Set<string>>(start.active);
+  const [assign, setAssign] = useState<Record<string, number>>(start.assign);
+  const [issues, setIssues] = useState<Issue[]>(day.issues);
   const [warnings, setWarnings] = useState<string[]>([]);
-  const [save, setSave] = useState<SaveState>({ kind: "idle" });
+  const [save, setSave] = useState<SaveState>(
+    day.saved ? { kind: "saved", at: day.saved.created_at.slice(11, 16) } : { kind: "idle" },
+  );
   const [picker, setPicker] = useState<PickerTarget | null>(null);
   const [sheet, setSheet] = useState(false);
   const [confirmGen, setConfirmGen] = useState(false);
-  const [presenceOpen, setPresenceOpen] = useState(true);
+  const [presenceOpen, setPresenceOpen] = useState(!day.saved);
   const [presenceQ, setPresenceQ] = useState("");
   const [generating, setGenerating] = useState(false);
   const [version, setVersion] = useState(0); // muda a cada edição manual -> salvamento automático
 
-  const vols = useMemo<Record<number, Volunteer>>(
-    () => Object.fromEntries((day?.volunteers ?? []).map((v) => [v.id, v])),
-    [day],
-  );
+  const vols = useMemo<Record<number, Volunteer>>(() => Object.fromEntries(day.volunteers.map((v) => [v.id, v])), [day]);
   const hasSchedule = Object.keys(assign).length > 0;
 
-  // ---------------------------------------------------------------- carregar dia
-  // Um pedido traz a equipe, a escala salva e as regras quebradas dela.
-  const load = useCallback(
-    async (d: string, t: string | null) => {
-      try {
-        const data = await api.sheet(d, t);
-        setDay(data);
-        setDefaults(data.default_active); // o padrão de posições é de cada equipe
-        const activeIds = data.volunteers.filter((v) => v.active).map((v) => v.id);
-        const next: Record<string, number> = {};
-        let act = new Set(data.default_active);
-        if (data.saved) {
-          const abs = new Set(data.saved.absent_ids);
-          setPresent(new Set(activeIds.filter((id) => !abs.has(id))));
-          setReasons(
-            Object.fromEntries(Object.entries(data.saved.absent_reasons ?? {}).map(([k, v]) => [Number(k), v])),
-          );
-          act = new Set(data.saved.active_codes ?? data.default_active);
-          data.saved.assignments.forEach((a) => {
-            if (positions[a.position_code]) {
-              next[a.position_code] = a.volunteer_id;
-              act.add(a.position_code);
-            }
-          });
-          setSave({ kind: "saved", at: data.saved.created_at.slice(11, 16) });
-          const pick = location.hash.match(/^#pick=(.+)$/);
-          if (pick) setTimeout(() => {
-            const el = document.querySelector(`[data-code="${pick[1]}"]`);
-            if (el) setPicker({ code: pick[1], rect: el.getBoundingClientRect() });
-          }, 400);
-          setPresenceOpen(false);
-        } else {
-          setPresent(new Set(activeIds));
-          setReasons({});
-          setSave({ kind: "idle" });
-          setPresenceOpen(true);
-        }
-        setActive(act);
-        setAssign(next);
-        setWarnings([]);
-        setIssues(data.issues);
-      } catch (e) {
-        toast.error((e as Error).message);
-      }
-    },
-    [],
-  );
-
+  // endereço com "#pick=CÓDIGO" já abre a troca dessa posição
   useEffect(() => {
-    if (goto) {
-      setDate(goto.date);
-      setTeam(goto.team);
-      onGotoDone();
-      return;
-    }
-    load(date, team);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [date, team, goto]);
+    const pick = day.saved && location.hash.match(/^#pick=(.+)$/);
+    if (!pick) return;
+    const t = setTimeout(() => {
+      const el = document.querySelector(`[data-code="${pick[1]}"]`);
+      if (el) setPicker({ code: pick[1], rect: el.getBoundingClientRect() });
+    }, 400);
+    return () => clearTimeout(t);
+  }, [day]);
+
+  /** Outra data: mantém a equipe só se ela foi escolhida (senão vale a sugerida para o novo dia). */
+  const changeDate = (next: string) => {
+    setDate(next);
+    onOpen({ page: "escala", date: next, team: route.team });
+  };
 
   // ---------------------------------------------------------------- salvar (automático)
   const latest = useRef({ day, present, active, assign, vols, reasons });
@@ -403,11 +384,11 @@ export function EscalaPage({
         <Input
           type="date"
           value={date}
-          onChange={(e) => e.target.value && setDate(e.target.value)}
+          onChange={(e) => e.target.value && changeDate(e.target.value)}
           className="w-[150px]"
           aria-label="Data do culto"
         />
-        <Select value={day?.team ?? ""} onValueChange={(v) => setTeam(v)}>
+        <Select value={day.team} onValueChange={(team) => onOpen({ page: "escala", date: day.date, team })}>
           <SelectTrigger className="w-[200px]">
             <Users className="size-4 text-muted-foreground" />
             <SelectValue placeholder="Equipe" />

@@ -75,8 +75,8 @@ O comando mostra quantas linhas leu e quantas gravou em cada tabela. O que ele f
 3. Libere o endereço do site no login do Neon; sem isso o login responde `invalid domain`:
    `neon neon-auth domain add https://seu-site.netlify.app`
 4. Publique de novo depois de mudar variáveis: elas só valem a partir da publicação seguinte.
-   O navegador guarda o endereço do login por até uma hora; se você trocar `NEON_AUTH_BASE_URL`,
-   quem abriu o site há pouco pode levar esse tempo para receber o novo.
+   O navegador guarda o endereço do login entre as visitas, para abrir sem esperar, e confere com
+   a API a cada abertura: se você trocar `NEON_AUTH_BASE_URL`, ele recarrega sozinho com o novo.
 
 ### 4. Primeiro acesso e administradores
 
@@ -113,8 +113,8 @@ Como a conta é criada ([`server/accounts.ts`](server/accounts.ts)): a API chama
 Auth com a senha sorteada, marca o e-mail como confirmado e apaga a sessão aberta pelo cadastro.
 "Gerar nova senha" apaga a conta de login e a recria; papel e equipes ficam como estavam.
 
-O site só baixa e mostra o sistema depois que a API valida a sessão e o acesso: quem não está
-logado, ou não foi liberado, recebe apenas a tela de login.
+O site só mostra o sistema depois que a API valida a sessão e o acesso: quem não está logado
+recebe apenas a tela de login, e os dados só são entregues pela API a quem foi liberado.
 
 "Esqueci a senha" manda um código por e-mail, pelo remetente compartilhado do Neon
 (`auth@mail.myneon.app`), e pode cair no spam. Para uso contínuo, o Neon recomenda configurar um
@@ -135,6 +135,31 @@ npm run build
   Python. Os casos ficam em `server/fixtures/parity.json` e são refeitos com
   `py -3 scripts/gen_parity.py` (precisa da pasta `app/escala`).
 
+## Telas e endereços
+
+Cada tela tem o seu endereço, que pode ser aberto direto, guardado nos favoritos ou enviado a
+outra pessoa (o botão voltar do navegador também funciona):
+
+| Endereço | Tela |
+| --- | --- |
+| `/escala` | Escala do próximo culto, com a equipe sugerida para o dia. |
+| `/escala/2026-12-06` | Escala desse dia, com a equipe sugerida. |
+| `/escala/2026-12-06/Domingo_Manha_A` | Escala desse dia e dessa equipe. |
+| `/voluntarios` | Cadastro de voluntários. |
+| `/historico` e `/historico/Domingo_Manha_A` | Histórico e faltas, de todas as equipes ou de uma. |
+| `/acessos` | Quem pode entrar (só administrador). |
+
+**Os dados chegam antes de a tela aparecer.** Nenhuma tela é desenhada vazia para ser preenchida
+depois ([`src/lib/screens.ts`](src/lib/screens.ts)):
+
+- Ao abrir o site, a validação do acesso, os dados da tela do endereço e o código do sistema são
+  pedidos ao mesmo tempo; a tela aparece uma vez, já completa. Da segunda visita em diante o
+  navegador já sabe o endereço do login e não espera a API para começar.
+- Ao trocar de tela (ou de data, ou de equipe), a tela atual continua no lugar, com uma barra fina
+  no topo, até a próxima estar com os dados. Só então a troca acontece.
+- Passar o mouse sobre um item do menu já adianta o pedido: na maioria das vezes, quando o clique
+  chega, os dados já estão lá.
+
 ## API
 
 A API é REST: cada endereço é um recurso e o verbo diz o que fazer com ele. Tudo exige o token do
@@ -145,7 +170,7 @@ acesso, 404 não existe).
 | Verbo e endereço | O que faz |
 | --- | --- |
 | `GET /api/config` | Endereço do login (público). |
-| `GET /api/me` | Quem está logado, o papel, as equipes e a data de hoje. |
+| `GET /api/me` | Quem está logado, o papel e as equipes. |
 | `GET /api/volunteers[?team=]` | Voluntários, com faltas, vezes que serviram e a última vez. |
 | `POST /api/volunteers` | Cadastra um voluntário (201). |
 | `PATCH /api/volunteers/:id` | Altera só os campos enviados. |
@@ -169,8 +194,7 @@ Como o sistema fica leve:
   dentro do próprio site.
 - **O banco filtra e soma.** As consultas já saem por equipe e com os totais prontos; o histórico
   manda só as colunas em que a pessoa serviu, e só de quem está ativo.
-- **Os dados nunca ficam em cache no navegador** (`Cache-Control: no-store`); só o endereço do
-  login fica, por uma hora.
+- **As respostas nunca ficam em cache no navegador** (`Cache-Control: no-store`).
 
 `server/client.test.ts` roda o cliente do site (`src/lib/api.ts`) contra as rotas de verdade: se um
 endereço ou verbo mudar de um lado só, o teste falha.

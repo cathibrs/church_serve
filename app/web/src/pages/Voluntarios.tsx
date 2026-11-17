@@ -58,8 +58,18 @@ const EMPTY: Partial<Volunteer> = {
   observation: "",
 };
 
-export function VoluntariosPage({ me }: { me: Me }) {
-  const [list, setList] = useState<Volunteer[]>([]);
+export function VoluntariosPage({
+  me,
+  volunteers,
+  onReload,
+}: {
+  me: Me;
+  /** a lista chega pronta: a tela nasce preenchida */
+  volunteers: Volunteer[];
+  /** busca a lista de novo (quando uma gravação falha e a tela pode ter ficado diferente do banco) */
+  onReload: () => void;
+}) {
+  const [list, setList] = useState<Volunteer[]>(volunteers);
   const [q, setQ] = useState("");
   const [team, setTeam] = useState("all");
   const [gender, setGender] = useState<"all" | "Feminino" | "Masculino">("all");
@@ -68,15 +78,6 @@ export function VoluntariosPage({ me }: { me: Me }) {
   const [withAbs, setWithAbs] = useState(false);
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "name", dir: 1 });
   const [edit, setEdit] = useState<Partial<Volunteer> | null>(null);
-
-  const reload = () =>
-    api
-      .volunteers()
-      .then(setList)
-      .catch((e) => toast.error(e.message));
-  useEffect(() => {
-    reload();
-  }, []);
 
   const rows = useMemo(() => {
     const nq = normalize(q);
@@ -123,7 +124,7 @@ export function VoluntariosPage({ me }: { me: Me }) {
       await api.updateVolunteer(v.id, patch);
     } catch (e) {
       toast.error((e as Error).message);
-      reload();
+      onReload();
     }
   };
 

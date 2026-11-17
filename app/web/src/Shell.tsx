@@ -1,12 +1,14 @@
 /**
- * O sistema em si (menu e telas). Este arquivo vira um pacote separado, que o navegador
- * só pede depois que a API validou a sessão e o acesso (ver App.tsx).
+ * O sistema em si (menu e telas). Cada tela tem o seu endereço (ver lib/screens.ts) e só
+ * aparece com os dados já carregados: ao navegar, a tela atual continua no lugar, com uma
+ * barra de progresso no topo, até a próxima estar completa.
  */
-import { useCallback, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
-import { Toaster } from "sonner";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { motion } from "motion/react";
+import { toast, Toaster } from "sonner";
 import type { Me } from "@/lib/api";
-import { AppSidebar, type Page } from "@/components/AppSidebar";
+import { href, load, parse, type Route, type Screen } from "@/lib/screens";
+import { AppSidebar } from "@/components/AppSidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { EscalaPage } from "@/pages/Escala";
 import { VoluntariosPage } from "@/pages/Voluntarios";
@@ -14,14 +16,14 @@ import { HistoricoPage } from "@/pages/Historico";
 import { AcessosPage } from "@/pages/Acessos";
 import { ChangePassword } from "@/components/ChangePassword";
 
-export default function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
+/** Como o endereço do navegador acompanha a troca de tela. */
+type Mode = "push" | "replace" | "pop";
+
+export default function Shell({ me, first, onSignOut }: { me: Me; first: Screen; onSignOut: () => void }) {
   const isAdmin = me.role === "admin";
-  const [page, setPage] = useState<Page>(() => {
-    const h = location.hash.slice(1);
-    if (h === "voluntarios" || h === "historico") return h;
-    return h === "acessos" && isAdmin ? h : "escala";
-  });
-  const [goto, setGoto] = useState<{ date: string; team: string } | null>(null);
+  /** Tela no ar e um número que muda a cada carga (as telas com edição recomeçam dos dados novos). */
+  const [shown, setShown] = useState({ screen: first, stamp: 0 });
+  const [loading, setLoading] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
   const [collapsed, setCollapsed] = useState(() => {
     try {
@@ -44,12 +46,56 @@ export default function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void
     [],
   );
 
+  const current = useRef(first.route);
+  current.current = shown.screen.route;
+  const latest = useRef(0); // só a navegação mais recente troca a tela
+
+  /** Busca os dados da tela e só então a mostra. */
+  const open = useCallback(
+    async (wanted: Route, mode: Mode = "push") => {
+      const route: Route = wanted.page === "acessos" && !isAdmin ? { page: "escala" } : wanted;
+      const turn = ++latest.current;
+      setLoading(true);
+      try {
+        const screen = await load(route);
+        if (turn !== latest.current) return;
+        if (mode === "push" && href(route) !== location.pathname) history.pushState(null, "", href(route) + location.search);
+        if (mode === "replace") history.replaceState(null, "", href(route) + location.search + location.hash);
+        setShown((s) => ({ screen, stamp: s.stamp + 1 }));
+      } catch (e) {
+        if (turn !== latest.current) return;
+        toast.error(e instanceof Error ? e.message : String(e));
+        // voltar/avançar já mudou o endereço: devolve o da tela que continua no ar
+        if (mode === "pop") history.replaceState(null, "", href(current.current) + location.search);
+      } finally {
+        if (turn === latest.current) setLoading(false);
+      }
+    },
+    [isAdmin],
+  );
+
+  useEffect(() => {
+    // o endereço passa a ser o da tela que abriu (ex.: "/" vira "/escala")
+    if (href(first.route) !== location.pathname) {
+      const keep = location.hash.startsWith("#pick=") ? location.hash : "";
+      history.replaceState(null, "", href(first.route) + location.search + keep);
+    }
+    const back = () => open(parse(), "pop");
+    window.addEventListener("popstate", back);
+    return () => window.removeEventListener("popstate", back);
+    // `first` é só a tela inicial
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const reload = useCallback(() => open(current.current, "replace"), [open]);
+  const { screen, stamp } = shown;
+
   return (
     <TooltipProvider delayDuration={250}>
       <div className="flex h-full">
         <AppSidebar
-          page={page}
-          onPage={setPage}
+          page={screen.page}
+          onOpen={open}
           onSignOut={onSignOut}
           onChangePassword={() => setChangingPassword(true)}
           userEmail={me.email}
@@ -57,30 +103,27 @@ export default function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void
           collapsed={collapsed}
           onToggle={toggleSidebar}
         />
-        <main className="min-w-0 flex-1 overflow-hidden">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={page}
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
-              transition={{ duration: 0.16 }}
-              className="h-full"
-            >
-              {page === "escala" && <EscalaPage me={me} goto={goto} onGotoDone={() => setGoto(null)} />}
-              {page === "voluntarios" && <VoluntariosPage me={me} />}
-              {page === "historico" && (
-                <HistoricoPage
-                  me={me}
-                  onOpen={(date, team) => {
-                    setGoto({ date, team });
-                    setPage("escala");
-                  }}
-                />
+        <main className="relative min-w-0 flex-1 overflow-hidden">
+          {loading && <div className="loading-bar no-print absolute inset-x-0 top-0 z-50 h-0.5 bg-primary" role="progressbar" />}
+          {/* A tela nova entra na hora em que os dados chegam: sem animação de saída segurando a troca. */}
+          <motion.div
+            key={screen.page}
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.12 }}
+            className="h-full"
+          >
+              {screen.page === "escala" && (
+                <EscalaPage key={stamp} me={me} route={screen.route} sheet={screen.data} onOpen={open} />
               )}
-              {page === "acessos" && isAdmin && <AcessosPage me={me} />}
-            </motion.div>
-          </AnimatePresence>
+              {screen.page === "voluntarios" && (
+                <VoluntariosPage key={stamp} me={me} volunteers={screen.data} onReload={reload} />
+              )}
+              {screen.page === "historico" && (
+                <HistoricoPage me={me} team={screen.route.team} data={screen.data} onOpen={open} />
+              )}
+              {screen.page === "acessos" && <AcessosPage key={stamp} me={me} users={screen.data} />}
+          </motion.div>
         </main>
       </div>
       <ChangePassword open={changingPassword} onOpenChange={setChangingPassword} />

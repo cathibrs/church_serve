@@ -1,12 +1,14 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { api, ApiError, type Me } from "@/lib/api";
+import { forget, parse, prefetch, type Screen } from "@/lib/screens";
 import { authClient, authConfigured, clearToken, signOut } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { AccessNotice, LoginPage } from "@/pages/Login";
 
-// O sistema (menu e telas) fica em um pacote separado: só é baixado depois que a API libera.
-const Shell = lazy(() => import("./Shell"));
+// O sistema (menu e telas) fica em um pacote separado: só quem tem sessão o baixa.
+const loadShell = () => import("./Shell");
+const Shell = lazy(loadShell);
 
 const Loading = () => (
   <div className="flex h-full items-center justify-center text-muted-foreground">
@@ -54,11 +56,14 @@ export default function App({ serverDown = false }: { serverDown?: boolean }) {
 
 /**
  * Valida na API antes de mostrar qualquer coisa: /api/me confere o token, o e-mail
- * confirmado e o acesso liberado. Até a resposta chegar só aparece "Carregando", e o
- * pacote do sistema nem é pedido ao servidor.
+ * confirmado e o acesso liberado.
+ *
+ * Para a primeira tela já aparecer completa, três coisas são pedidas ao mesmo tempo: a
+ * validação, os dados da tela do endereço aberto e o pacote do sistema. Até tudo chegar só
+ * aparece "Carregando"; os dados só são entregues pela API a quem ela valida.
  */
 function Gate({ onReady, onRejected }: { onReady: () => void; onRejected: (reason: string) => void }) {
-  const [me, setMe] = useState<Me | null>(null);
+  const [ready, setReady] = useState<{ me: Me; first: Screen } | null>(null);
   const [denied, setDenied] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -66,11 +71,18 @@ function Gate({ onReady, onRejected }: { onReady: () => void; onRejected: (reaso
   useEffect(() => {
     let alive = true;
     setFailed(null);
+    if (attempt === 0) forget(); // nada de dados adiantados por outra conta
+    const route = parse();
+    const wanted = prefetch(route);
+    wanted.catch(() => {}); // o erro é tratado abaixo, depois da validação
+    loadShell().catch(() => {}); // se falhar aqui, o Suspense tenta de novo e mostra o erro
     api
       .me()
-      .then((d) => {
+      .then(async (me) => {
+        // endereço que a pessoa não pode abrir (ou que não existe mais) cai na escala
+        const first = await wanted.catch(() => prefetch({ page: "escala" }));
         if (!alive) return;
-        setMe(d);
+        setReady({ me, first: first.page === "acessos" && me.role !== "admin" ? await prefetch({ page: "escala" }) : first });
         onReady();
       })
       .catch((e) => {
@@ -120,10 +132,10 @@ function Gate({ onReady, onRejected }: { onReady: () => void; onRejected: (reaso
         {failed}
       </AccessNotice>
     );
-  if (!me) return <Loading />;
+  if (!ready) return <Loading />;
   return (
     <Suspense fallback={<Loading />}>
-      <Shell me={me} onSignOut={leave} />
+      <Shell me={ready.me} first={ready.first} onSignOut={leave} />
     </Suspense>
   );
 }

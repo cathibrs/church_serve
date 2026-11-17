@@ -22,6 +22,14 @@
   targetPort = 5173
   port = 8888
 
+# Cada tela tem o seu endereço (/escala, /voluntarios, /historico, /acessos): todos entregam
+# o mesmo site, que abre na tela certa. A API (/api/*) e os arquivos que existem vêm antes
+# desta regra, então não são afetados.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
 [[headers]]
   for = "/*"
   [headers.values]

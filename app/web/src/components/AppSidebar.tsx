@@ -1,10 +1,9 @@
 import { useEffect } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { CalendarRange, History, KeyRound, Lock, LogOut, PanelLeftClose, PanelLeftOpen, Users } from "lucide-react";
+import { href, prefetch, type Page, type Route } from "@/lib/screens";
 import { cn } from "@/lib/utils";
 import { Tooltip } from "./ui/tooltip";
-
-export type Page = "escala" | "voluntarios" | "historico" | "acessos";
 
 const NAV: { id: Page; label: string; icon: React.ElementType; hint: string; adminOnly?: boolean }[] = [
   { id: "escala", label: "Escala", icon: CalendarRange, hint: "Mapa e ficha do culto" },
@@ -18,7 +17,7 @@ const CLOSED_W = 68;
 
 export function AppSidebar({
   page,
-  onPage,
+  onOpen,
   onSignOut,
   onChangePassword,
   userEmail,
@@ -27,7 +26,7 @@ export function AppSidebar({
   onToggle,
 }: {
   page: Page;
-  onPage: (p: Page) => void;
+  onOpen: (route: Route) => void;
   onSignOut: () => void;
   onChangePassword: () => void;
   userEmail: string;
@@ -60,7 +59,7 @@ export function AppSidebar({
           {collapsed ? (
             <motion.img
               key="mark"
-              src="./logo-mark.png"
+              src="/logo-mark.png"
               alt="Lagoinha Jundiaí"
               initial={{ opacity: 0, scale: 0.8 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -76,7 +75,7 @@ export function AppSidebar({
               exit={{ opacity: 0 }}
               className="flex flex-col items-center"
             >
-              <img src="./logo.png" alt="Lagoinha Jundiaí" className="w-[136px] mix-blend-screen select-none" draggable={false} />
+              <img src="/logo.png" alt="Lagoinha Jundiaí" className="w-[136px] mix-blend-screen select-none" draggable={false} />
               <div className="mt-1 text-[11px] font-semibold tracking-[0.22em] whitespace-nowrap text-white/70 uppercase">
                 Escala de voluntários
               </div>
@@ -91,11 +90,22 @@ export function AppSidebar({
         {NAV.filter((n) => isAdmin || !n.adminOnly).map((n) => {
           const on = page === n.id;
           const Icon = n.icon;
+          const route: Route = { page: n.id };
+          // link de verdade (abre em nova aba, copia o endereço); o clique comum troca a tela sem recarregar
           const btn = (
-            <button
+            <a
               key={n.id}
-              onClick={() => onPage(n.id)}
+              href={href(route)}
+              onClick={(e) => {
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                e.preventDefault();
+                onOpen(route);
+              }}
+              // o mouse (ou o foco) chega antes do clique: os dados já vêm vindo
+              onPointerEnter={() => on || prefetch(route).catch(() => {})}
+              onFocus={() => on || prefetch(route).catch(() => {})}
               aria-label={n.label}
+              aria-current={on ? "page" : undefined}
               className={cn(
                 "group relative flex items-center rounded-lg text-left transition-colors",
                 collapsed ? "size-12 justify-center" : "gap-3 px-3 py-2.5",
@@ -118,7 +128,7 @@ export function AppSidebar({
                   </span>
                 </span>
               )}
-            </button>
+            </a>
           );
           return collapsed ? (
             <Tooltip key={n.id} content={n.label} side="right">

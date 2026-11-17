@@ -104,15 +104,15 @@ describe("acesso", () => {
     expect((await get("/api/volunteers")).data.some((v: any) => v.name === "Intruso")).toBe(false);
   });
 
-  it("endereço do login é público, não traz nenhum dado e pode ficar guardado no navegador", async () => {
+  it("endereço do login é público e não traz nenhum dado", async () => {
     process.env.NEON_AUTH_BASE_URL = "https://auth.exemplo/neondb/auth";
     const r = await get("/api/config", null);
-    expect(r).toEqual({ status: 200, data: { auth_url: "https://auth.exemplo/neondb/auth" }, cache: "public, max-age=3600" });
+    expect(r).toEqual({ status: 200, data: { auth_url: "https://auth.exemplo/neondb/auth" }, cache: "no-store" });
     delete process.env.NEON_AUTH_BASE_URL;
     expect(await get("/api/config", null)).toEqual({ status: 200, data: { auth_url: null }, cache: "no-store" });
   });
 
-  it("os dados nunca ficam guardados no navegador", async () => {
+  it("as respostas nunca ficam em cache no navegador", async () => {
     expect((await get("/api/volunteers")).cache).toBe("no-store");
   });
 
@@ -136,7 +136,6 @@ describe("acessos: admin e coordenador", () => {
     const { data } = await get("/api/me");
     expect(data).toMatchObject({ email: LEADER, role: "admin" });
     expect(data.teams.length).toBeGreaterThanOrEqual(6);
-    expect(data.today).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     const created = await call("POST", "/api/volunteers", { name: "De Outra Equipe", gender: "Feminino", team: OTHER });
     expect(created.data).toMatchObject({ name: "De Outra Equipe", team: OTHER, active: true });
     outsiderId = created.data.id;

@@ -81,18 +81,14 @@ function TeamPicker({ all, value, onChange }: { all: string[]; value: string[]; 
 }
 
 /** Tela do administrador: quem pode entrar no sistema, com qual papel e em quais equipes. */
-export function AcessosPage({ me }: { me: Me }) {
-  const [list, setList] = useState<AccessUser[] | null>(null);
+export function AcessosPage({ me, users }: { me: Me; users: AccessUser[] }) {
+  const [list, setList] = useState<AccessUser[]>(users); // chega pronta: a tela nasce preenchida
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [busy, setBusy] = useState(false);
   const [removing, setRemoving] = useState<AccessUser | null>(null);
   const [resetting, setResetting] = useState<AccessUser | null>(null);
   /** senha recém-criada, mostrada uma única vez */
   const [shown, setShown] = useState<NewPassword | null>(null);
-
-  useEffect(() => {
-    api.users().then(setList).catch((e) => toast.error(e.message));
-  }, []);
 
   async function run(action: () => Promise<void>): Promise<boolean> {
     setBusy(true);
@@ -109,7 +105,7 @@ export function AcessosPage({ me }: { me: Me }) {
 
   /** Aplica na lista da tela o acesso que a API devolveu, sem pedir a lista inteira de novo. */
   const apply = (change: AccessChange, done: string) => {
-    setList((l) => sorted([...(l ?? []).filter((u) => u.email !== change.user.email), change.user]));
+    setList((l) => sorted([...l.filter((u) => u.email !== change.user.email), change.user]));
     if (change.password) setShown({ email: change.user.email, value: change.password });
     else toast.success(done);
   };
@@ -128,7 +124,7 @@ export function AcessosPage({ me }: { me: Me }) {
     if (await run(async () => apply(await api.saveUser(address, access), done))) setDraft(EMPTY);
   };
 
-  const admins = list?.filter((u) => u.role === "admin").length ?? 0;
+  const admins = list.filter((u) => u.role === "admin").length;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -136,7 +132,7 @@ export function AcessosPage({ me }: { me: Me }) {
         <div className="mr-auto">
           <h1 className="text-[15px] leading-tight font-semibold">Acessos</h1>
           <p className="text-xs text-muted-foreground">
-            {list ? `${list.length} e-mail(s) liberado(s) · ${admins} administrador(es)` : "Carregando…"}
+            {`${list.length} e-mail(s) liberado(s) · ${admins} administrador(es)`}
           </p>
         </div>
       </header>
@@ -206,7 +202,7 @@ export function AcessosPage({ me }: { me: Me }) {
               </tr>
             </thead>
             <tbody>
-              {list?.map((u) => {
+              {list.map((u) => {
                 const self = u.email === me.email;
                 const lastAdmin = u.role === "admin" && admins <= 1;
                 const locked = self || lastAdmin;
@@ -315,7 +311,7 @@ export function AcessosPage({ me }: { me: Me }) {
           if (draft.editing && draft.email === target.email) setDraft(EMPTY);
           run(async () => {
             await api.removeUser(target.email);
-            setList((l) => l?.filter((u) => u.email !== target.email) ?? null);
+            setList((l) => l.filter((u) => u.email !== target.email));
             toast.success(`Acesso de ${target.email} removido.`);
           });
         }}

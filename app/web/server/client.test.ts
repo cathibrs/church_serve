@@ -13,6 +13,7 @@ const ADMIN = "lider@igreja.org";
 vi.mock("../src/lib/auth.ts", () => ({ getToken: async () => ADMIN, clearToken: () => {} }));
 
 const { api, ApiError, FACTORY_ACTIVE } = await import("../src/lib/api.ts");
+const { href, load, nextService, parse, prefetch } = await import("../src/lib/screens.ts");
 
 const TEAM = "Quarta-Feira_Noite_A"; // com hífen, para exercitar o endereço
 const DATE = "2026-12-09"; // quarta-feira
@@ -120,6 +121,68 @@ it("o site percorre todas as rotas: voluntários, escala, histórico e acessos",
   expect(requests).toContain(`POST /api/schedules/${DATE}/${TEAM}/suggestion`);
   expect(requests).toContain("PUT /api/users/nova%2Bpessoa%40igreja.org");
   expect(requests).toContain("DELETE /api/users/nova%2Bpessoa%40igreja.org");
+});
+
+it("cada tela tem o seu endereço", () => {
+  const at = (pathname: string, hash = "") => parse({ pathname, hash });
+  expect(at("/")).toEqual({ page: "escala" });
+  expect(at("/escala")).toEqual({ page: "escala" });
+  expect(at("/escala/2026-12-09")).toEqual({ page: "escala", date: DATE, team: undefined });
+  expect(at(`/escala/${DATE}/${TEAM}`)).toEqual({ page: "escala", date: DATE, team: TEAM });
+  expect(at("/escala/Domingo%20%C3%A0%20noite")).toEqual({ page: "escala" }); // sem data válida
+  expect(at("/voluntarios")).toEqual({ page: "voluntarios" });
+  expect(at("/historico")).toEqual({ page: "historico", team: undefined });
+  expect(at("/historico/Domingo%20Manha")).toEqual({ page: "historico", team: "Domingo Manha" });
+  expect(at("/acessos")).toEqual({ page: "acessos" });
+  expect(at("/nao-existe/1")).toEqual({ page: "escala" });
+  expect(at("/", "#historico")).toEqual({ page: "historico" }); // endereço antigo, com "#"
+
+  // ida e volta: o endereço montado leva à mesma tela
+  for (const route of [
+    { page: "escala" },
+    { page: "escala", date: DATE },
+    { page: "escala", date: DATE, team: TEAM },
+    { page: "voluntarios" },
+    { page: "historico" },
+    { page: "historico", team: "Equipe com espaço/barra" },
+    { page: "acessos" },
+  ] as const) {
+    expect(parse({ pathname: href(route), hash: "" })).toMatchObject(route);
+  }
+});
+
+it("sem data no endereço, a escala abre no próximo culto", () => {
+  expect(nextService("2026-12-06")).toBe("2026-12-06"); // domingo: hoje
+  expect(nextService("2026-12-09")).toBe("2026-12-09"); // quarta: hoje
+  expect(nextService("2026-12-07")).toBe("2026-12-13"); // segunda: próximo domingo
+  expect(nextService("2026-12-31")).toBe("2027-01-03"); // vira o ano
+  expect(nextService()).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+});
+
+it("os dados de cada tela vêm prontos antes de ela aparecer, e o pedido adiantado é aproveitado", async () => {
+  const sheet = await load({ page: "escala", date: DATE, team: TEAM });
+  expect(sheet).toMatchObject({ page: "escala", data: { date: DATE, team: TEAM } });
+  if (sheet.page === "escala") expect(sheet.data.saved?.assignments.length).toBeGreaterThan(0);
+  expect((await load({ page: "escala" })).page).toBe("escala"); // sem data: próximo culto, equipe sugerida
+
+  const volunteers = await load({ page: "voluntarios" });
+  expect(volunteers.page === "voluntarios" && volunteers.data).toHaveLength(30);
+  const history = await load({ page: "historico", team: TEAM });
+  expect(history.page === "historico" && history.data.people).toHaveLength(30);
+  expect(history.page === "historico" && history.data.schedules).toHaveLength(1);
+  const access = await load({ page: "acessos" });
+  expect(access.page === "acessos" && access.data.map((u) => u.email)).toEqual([ADMIN]);
+
+  // passar o mouse no menu adianta o pedido: abrir a tela em seguida não pede de novo
+  requests.length = 0;
+  const ahead = prefetch({ page: "voluntarios" });
+  expect(prefetch({ page: "voluntarios" })).toBe(ahead);
+  expect(load({ page: "voluntarios" })).toBe(ahead);
+  await ahead;
+  expect(requests).toEqual(["GET /api/volunteers"]);
+  // a abertura seguinte busca dados novos
+  await load({ page: "voluntarios" });
+  expect(requests).toEqual(["GET /api/volunteers", "GET /api/volunteers"]);
 });
 
 it("erro da API vira ApiError com a mensagem e o status", async () => {

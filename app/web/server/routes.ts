@@ -2,7 +2,7 @@
  * API REST (/api/*). Cada endereço é um recurso e o verbo diz o que fazer com ele:
  *
  *   GET    /api/config                             público: endereço do login
- *   GET    /api/me                                 quem está logado, papel, equipes e a data de hoje
+ *   GET    /api/me                                 quem está logado, papel e equipes
  *
  *   GET    /api/volunteers[?team=]                 voluntários, com faltas e vezes que serviram
  *   POST   /api/volunteers                         cadastra (201)
@@ -186,12 +186,7 @@ function issuesOf(roster: Volunteer[], assignments: Assignment[], date: string, 
 // ====================================================================== sessão
 
 async function getMe({ sql, user }: Ctx) {
-  return {
-    email: user.email,
-    role: user.role,
-    teams: ownTeams(user) ?? (await db.getAvailableTeams(sql)),
-    today: localNow().date,
-  };
+  return { email: user.email, role: user.role, teams: ownTeams(user) ?? (await db.getAvailableTeams(sql)) };
 }
 
 // ====================================================================== voluntários
@@ -477,11 +472,11 @@ function match(method: string, path: string): { handler: Handler; params: Record
 
 // ====================================================================== HTTP
 
-function respond(data: unknown, status = 200, cache = "no-store"): Response {
-  if (status === 204) return new Response(null, { status, headers: { "Cache-Control": cache } });
+function respond(data: unknown, status = 200): Response {
+  if (status === 204) return new Response(null, { status, headers: { "Cache-Control": "no-store" } });
   return new Response(JSON.stringify(data), {
     status,
-    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": cache },
+    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
   });
 }
 
@@ -509,11 +504,10 @@ export async function handle(request: Request, opts: HandleOptions = {}): Promis
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/+$/, "");
   try {
-    // Pública: o navegador precisa do endereço do login antes de existir sessão. Como só muda
-    // quando o site é publicado de novo, o navegador pode guardar por uma hora e abrir mais rápido.
+    // Pública: o navegador precisa do endereço do login antes de existir sessão. Ele guarda o
+    // endereço entre as visitas e usa esta rota só para conferir se mudou (ver src/main.tsx).
     if (request.method === "GET" && path === "/api/config") {
-      const authUrl = process.env.NEON_AUTH_BASE_URL || null;
-      return respond({ auth_url: authUrl }, 200, authUrl ? "public, max-age=3600" : "no-store");
+      return respond({ auth_url: process.env.NEON_AUTH_BASE_URL || null });
     }
     const route = match(request.method, path);
     if (!route) return failure(404, "rota inválida");

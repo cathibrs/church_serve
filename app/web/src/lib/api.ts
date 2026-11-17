@@ -56,8 +56,6 @@ export interface Me {
   role: Role;
   /** equipes que a pessoa pode usar (admin: todas) */
   teams: string[];
-  /** data de hoje no horário de São Paulo */
-  today: string;
 }
 
 /** Um e-mail com acesso liberado e a situação da conta dele no login. */
