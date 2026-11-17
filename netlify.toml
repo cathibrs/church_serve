@@ -6,6 +6,11 @@
 
 [build.environment]
   NODE_VERSION = "24"
+  # A verificação de segredos do Netlify barra o build quando acha, em qualquer arquivo, o valor
+  # de uma variável marcada como secreta. Estas não são segredo (nome do branch e endereços
+  # públicos do login) e seus valores são texto comum, como "production". DATABASE_URL e
+  # DATABASE_URL_UNPOOLED continuam verificadas.
+  SECRETS_SCAN_OMIT_KEYS = "NEON_BRANCH,NEON_BRANCH_ID,NEON_FUNCTION_HOST_SUFFIX,NEON_AUTH_BASE_URL,NEON_AUTH_JWKS_URL"
 
 [functions]
   directory = "netlify/functions"
