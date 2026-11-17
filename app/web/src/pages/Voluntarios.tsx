@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ArrowDown, ArrowUp, ChevronsUpDown, FilterX, ListFilter, Pencil, Plus, Search, Users } from "lucide-react";
-import { api, type InitData, type Volunteer } from "@/lib/api";
+import { api, type Me, type SavedVolunteer, type Volunteer, type VolunteerFields } from "@/lib/api";
 import { br, cn, normalize, teamLabel } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -30,6 +30,19 @@ const PERMS = [
   ["can_limpar_altar", "Altar"],
 ] as const;
 type PermKey = (typeof PERMS)[number][0];
+/** Campos do cadastro: só eles são enviados à API. */
+const FIELDS = [
+  "name",
+  "gender",
+  "team",
+  "active",
+  "can_bercario",
+  "can_cozinha",
+  "can_recepcao",
+  "can_banheiro",
+  "can_limpar_altar",
+  "observation",
+] as const;
 type SortKey = "name" | "team" | "faltas" | "vezes" | "ultima_vez";
 
 const EMPTY: Partial<Volunteer> = {
@@ -45,7 +58,7 @@ const EMPTY: Partial<Volunteer> = {
   observation: "",
 };
 
-export function VoluntariosPage({ init }: { init: InitData }) {
+export function VoluntariosPage({ me }: { me: Me }) {
   const [list, setList] = useState<Volunteer[]>([]);
   const [q, setQ] = useState("");
   const [team, setTeam] = useState("all");
@@ -59,7 +72,7 @@ export function VoluntariosPage({ init }: { init: InitData }) {
   const reload = () =>
     api
       .volunteers()
-      .then((r) => setList(r.volunteers))
+      .then(setList)
       .catch((e) => toast.error(e.message));
   useEffect(() => {
     reload();
@@ -95,11 +108,19 @@ export function VoluntariosPage({ init }: { init: InitData }) {
     setWithAbs(false);
   };
 
-  const quickSave = async (v: Volunteer, patch: Partial<Volunteer>) => {
-    const next = { ...v, ...patch };
-    setList((l) => l.map((x) => (x.id === v.id ? next : x)));
+  /** Põe na lista o cadastro que a API devolveu, sem pedir a lista inteira de novo. */
+  const merge = (saved: SavedVolunteer) =>
+    setList((l) => {
+      const old = l.find((x) => x.id === saved.id);
+      const next: Volunteer = { faltas: 0, vezes: 0, ultima_vez: null, ...old, ...saved };
+      return old ? l.map((x) => (x.id === saved.id ? next : x)) : [...l, next];
+    });
+
+  /** Marca na hora e envia só o campo que mudou. */
+  const quickSave = async (v: Volunteer, patch: Partial<VolunteerFields>) => {
+    setList((l) => l.map((x) => (x.id === v.id ? { ...x, ...patch } : x)));
     try {
-      await api.saveVolunteer(next);
+      await api.updateVolunteer(v.id, patch);
     } catch (e) {
       toast.error((e as Error).message);
       reload();
@@ -141,7 +162,7 @@ export function VoluntariosPage({ init }: { init: InitData }) {
             <b className="font-medium text-foreground">{rows.length} na lista</b>
           </p>
         </div>
-        <Button onClick={() => setEdit({ ...EMPTY, team: team !== "all" ? team : init.team })}>
+        <Button onClick={() => setEdit({ ...EMPTY, team: team !== "all" ? team : (me.teams[0] ?? "") })}>
           <Plus /> Novo voluntário
         </Button>
       </header>
@@ -159,7 +180,7 @@ export function VoluntariosPage({ init }: { init: InitData }) {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todas as equipes</SelectItem>
-            {init.teams.map((t) => (
+            {me.teams.map((t) => (
               <SelectItem key={t} value={t}>
                 {teamLabel(t)}
               </SelectItem>
@@ -322,11 +343,11 @@ export function VoluntariosPage({ init }: { init: InitData }) {
 
       <VolunteerSheet
         value={edit}
-        teams={init.teams}
+        teams={me.teams}
         onClose={() => setEdit(null)}
-        onSaved={() => {
+        onSaved={(saved) => {
           setEdit(null);
-          reload();
+          merge(saved);
         }}
       />
     </div>
@@ -342,7 +363,7 @@ function VolunteerSheet({
   value: Partial<Volunteer> | null;
   teams: string[];
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (saved: SavedVolunteer) => void;
 }) {
   const [f, setF] = useState<Partial<Volunteer>>(EMPTY);
   useEffect(() => {
@@ -352,9 +373,10 @@ function VolunteerSheet({
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await api.saveVolunteer(f);
+      const fields = Object.fromEntries(FIELDS.map((k) => [k, f[k]])) as Partial<VolunteerFields>;
+      const saved = f.id ? await api.updateVolunteer(f.id, fields) : await api.createVolunteer(fields);
       toast.success("Cadastro salvo.");
-      onSaved();
+      onSaved(saved);
     } catch (err) {
       toast.error((err as Error).message);
     }

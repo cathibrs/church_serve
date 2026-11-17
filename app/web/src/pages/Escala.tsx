@@ -17,7 +17,17 @@ import {
   UserCheck,
   Users,
 } from "lucide-react";
-import { api, type Assignment, type DayData, type InitData, type Issue, type Volunteer } from "@/lib/api";
+import {
+  api,
+  FACTORY_ACTIVE,
+  POSITIONS,
+  type Assignment,
+  type Issue,
+  type Me,
+  type Position,
+  type Sheet,
+  type Volunteer,
+} from "@/lib/api";
 import { ENTRY_CATS, EXIT_CATS, MAP_CATS, REC, allowed, swapGroup } from "@/lib/rules";
 import { FICHA, downloadPNG, fichaSVG, mapSVG, type MapState } from "@/lib/map";
 import { cn, normalize, teamLabel } from "@/lib/utils";
@@ -37,11 +47,15 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { PersonPicker, type PickerTarget } from "@/components/PersonPicker";
 import { PositionsSheet } from "@/components/PositionsSheet";
 
+/** Posições por código. São fixas: vêm do catálogo que já está dentro do site. */
+const positions: Record<string, Position> = Object.fromEntries(POSITIONS.map((p) => [p.code, p]));
+const recCodes = POSITIONS.filter((p) => p.category === REC).map((p) => p.code);
+
 type SaveState =
   | { kind: "idle" }
   | { kind: "pending" }
   | { kind: "saving" }
-  | { kind: "saved"; at: string; warn?: string }
+  | { kind: "saved"; at: string }
   | { kind: "error"; msg: string };
 
 function nextService(todayIso: string) {
@@ -52,23 +66,22 @@ function nextService(todayIso: string) {
 }
 
 export function EscalaPage({
-  init,
+  me,
   goto,
   onGotoDone,
 }: {
-  init: InitData;
+  me: Me;
   goto: { date: string; team: string } | null;
   onGotoDone: () => void;
 }) {
-  const positions = useMemo(() => Object.fromEntries(init.positions.map((p) => [p.code, p])), [init]);
-  const [defaults, setDefaults] = useState<string[]>(init.default_active);
+  const [defaults, setDefaults] = useState<string[]>(FACTORY_ACTIVE);
 
-  const [date, setDate] = useState(() => nextService(init.today));
+  const [date, setDate] = useState(() => nextService(me.today));
   const [team, setTeam] = useState<string | null>(null); // null = sugestão automática
-  const [day, setDay] = useState<DayData | null>(null);
+  const [day, setDay] = useState<Sheet | null>(null);
   const [present, setPresent] = useState<Set<number>>(new Set());
   const [reasons, setReasons] = useState<Record<number, string>>({}); // motivo da falta
-  const [active, setActive] = useState<Set<string>>(new Set(init.default_active));
+  const [active, setActive] = useState<Set<string>>(new Set(FACTORY_ACTIVE));
   const [assign, setAssign] = useState<Record<string, number>>({});
   const [issues, setIssues] = useState<Issue[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -88,10 +101,11 @@ export function EscalaPage({
   const hasSchedule = Object.keys(assign).length > 0;
 
   // ---------------------------------------------------------------- carregar dia
+  // Um pedido traz a equipe, a escala salva e as regras quebradas dela.
   const load = useCallback(
     async (d: string, t: string | null) => {
       try {
-        const data = await api.day(d, t);
+        const data = await api.sheet(d, t);
         setDay(data);
         setDefaults(data.default_active); // o padrão de posições é de cada equipe
         const activeIds = data.volunteers.filter((v) => v.active).map((v) => v.id);
@@ -126,21 +140,12 @@ export function EscalaPage({
         setActive(act);
         setAssign(next);
         setWarnings([]);
-        setIssues([]);
-        if (data.saved) {
-          const r = await api.validate({
-            date: data.date,
-            team: data.team,
-            present_ids: activeIds.filter((id) => !new Set(data.saved!.absent_ids).has(id)),
-            assignments: toAssignments(next, Object.fromEntries(data.volunteers.map((v) => [v.id, v]))),
-          });
-          setIssues(r.issues);
-        }
+        setIssues(data.issues);
       } catch (e) {
         toast.error((e as Error).message);
       }
     },
-    [positions],
+    [],
   );
 
   useEffect(() => {
@@ -163,8 +168,6 @@ export function EscalaPage({
     if (!s.day || !Object.keys(s.assign).length) return;
     setSave({ kind: "saving" });
     const body = {
-      date: s.day.date,
-      team: s.day.team,
       present_ids: [...s.present],
       active_codes: [...s.active],
       assignments: toAssignments(s.assign, s.vols),
@@ -173,11 +176,10 @@ export function EscalaPage({
       ),
     };
     try {
-      const v = await api.validate(body);
-      setIssues(v.issues);
-      const r = await api.save(body);
-      setSave({ kind: "saved", at: r.saved_at.slice(0, 5), warn: r.warnings.join(" ") || undefined });
-      if (r.warnings.length) toast.warning(r.warnings.join(" "));
+      // gravar já devolve as regras quebradas: não há um pedido separado só para conferir
+      const r = await api.saveSchedule(s.day.date, s.day.team, body);
+      setIssues(r.issues);
+      setSave({ kind: "saved", at: r.saved_at.slice(0, 5) });
     } catch (e) {
       setSave({ kind: "error", msg: (e as Error).message });
     }
@@ -197,9 +199,7 @@ export function EscalaPage({
     if (!day) return;
     setGenerating(true);
     try {
-      const r = await api.generate({
-        date: day.date,
-        team: day.team,
+      const r = await api.suggestSchedule(day.date, day.team, {
         present_ids: [...present],
         active_codes: [...active],
       });
@@ -362,12 +362,8 @@ export function EscalaPage({
 
   // ---------------------------------------------------------------- derivados
   const bad = useMemo(() => new Set(issues.flatMap((i) => i.codes)), [issues]);
-  const recCodes = useMemo(
-    () => Object.values(positions).filter((p) => p.category === "Recepcao").map((p) => p.code).sort(),
-    [positions],
-  );
   const mapState: MapState = { positions, active, assign, vols, bad, day };
-  const svg = useMemo(() => mapSVG(mapState), [positions, active, assign, vols, bad, day]); // eslint-disable-line
+  const svg = useMemo(() => mapSVG(mapState), [active, assign, vols, bad, day]); // eslint-disable-line
   const activeVols = (day?.volunteers ?? []).filter((v) => v.active).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
   const absentCount = activeVols.filter((v) => !present.has(v.id)).length;
   const filteredVols = presenceQ ? activeVols.filter((v) => normalize(v.name).includes(normalize(presenceQ))) : activeVols;
@@ -417,7 +413,7 @@ export function EscalaPage({
             <SelectValue placeholder="Equipe" />
           </SelectTrigger>
           <SelectContent>
-            {init.teams.map((t) => (
+            {me.teams.map((t) => (
               <SelectItem key={t} value={t}>
                 {teamLabel(t)}
               </SelectItem>
@@ -752,8 +748,8 @@ Obs.: ${v.observation}` : ""}`}
         onSaveDefault={async () => {
           try {
             if (!day) return;
-            const r = await api.setDefaultPositions([...active], day.team);
-            setDefaults(r.default_active);
+            const r = await api.setTeamPositions(day.team, [...active]);
+            setDefaults(r.codes);
             toast.success("Posições salvas como padrão para os próximos cultos desta equipe.");
           } catch (e) {
             toast.error((e as Error).message);
@@ -840,9 +836,9 @@ function SaveIndicator({ state }: { state: SaveState }) {
       </Tooltip>
     );
   return (
-    <Tooltip content={state.warn || "Escala salva."}>
-      <span className={cn(base, state.warn ? "text-amber-700" : "text-emerald-700")}>
-        {state.warn ? <AlertTriangle className="size-3" /> : <Check className="size-3" />}
+    <Tooltip content="Escala salva.">
+      <span className={cn(base, "text-emerald-700")}>
+        <Check className="size-3" />
         Salvo às {state.at}
       </span>
     </Tooltip>

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { motion } from "motion/react";
 import { CalendarCheck, ChevronRight, Search, TrendingDown, UserX, Users } from "lucide-react";
-import { api, type AbsenceItem, type HistoryData, type InitData } from "@/lib/api";
+import { api, type AbsenceItem, type HistoryRow, type Me, type ScheduleRow } from "@/lib/api";
 import { br, cn, normalize, teamLabel } from "@/lib/utils";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -22,41 +22,66 @@ const TASK_SHORT: Record<string, string> = {
   "Recepção": "Rec",
 };
 
-export function HistoricoPage({ init, onOpen }: { init: InitData; onOpen: (date: string, team: string) => void }) {
+/** Colunas das posições do mapa, na ordem da planilha antiga. */
+const POS_COLS = [
+  "POS_BM",
+  "POS_GM",
+  "POS_GF",
+  "POS_BK",
+  "POS_BF",
+  ...Array.from({ length: 22 }, (_, i) => `POS_${String(i + 1).padStart(2, "0")}`),
+];
+const COLS = [...TASKS, ...POS_COLS];
+
+export function HistoricoPage({ me, onOpen }: { me: Me; onOpen: (date: string, team: string) => void }) {
   const [team, setTeam] = useState("all");
-  const [data, setData] = useState<HistoryData | null>(null);
+  const [people, setPeople] = useState<HistoryRow[]>([]); // só voluntários ativos
+  const [sched, setSched] = useState<ScheduleRow[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [q, setQ] = useState("");
   const [onlyAbs, setOnlyAbs] = useState(false);
 
   useEffect(() => {
-    api
-      .history(team === "all" ? "" : team)
-      .then(setData)
+    let alive = true;
+    const filter = team === "all" ? undefined : team;
+    // os dois recursos são pedidos juntos; os indicadores são contas feitas aqui sobre eles
+    Promise.all([api.history(filter), api.schedules(filter)])
+      .then(([h, s]) => {
+        if (!alive) return;
+        setPeople(h);
+        setSched(s);
+        setLoaded(true);
+      })
       .catch((e) => toast.error(e.message));
+    return () => {
+      alive = false;
+    };
   }, [team]);
 
   const rows = useMemo(() => {
     const nq = normalize(q);
-    return (data?.rows ?? []).filter(
-      (r) => r.Ativo && (!nq || normalize(r.Voluntarios).includes(nq)) && (!onlyAbs || r.Total_Faltas > 0),
-    );
-  }, [data, q, onlyAbs]);
-  const posCols = (data?.headers ?? []).filter((h) => h.startsWith("POS_"));
-  const ranking = useMemo(
-    () => (data?.rows ?? []).filter((r) => r.Ativo && r.Total_Faltas > 0).sort((a, b) => b.Total_Faltas - a.Total_Faltas),
-    [data],
-  );
-  const maxAbs = Math.max(1, ...ranking.map((r) => r.Total_Faltas));
-  const sched = data?.schedules ?? [];
+    return people.filter((r) => (!nq || normalize(r.name).includes(nq)) && (!onlyAbs || r.faltas > 0));
+  }, [people, q, onlyAbs]);
+  const ranking = useMemo(() => people.filter((r) => r.faltas > 0).sort((a, b) => b.faltas - a.faltas), [people]);
+  const maxAbs = Math.max(1, ...ranking.map((r) => r.faltas));
   const recent = [...sched].reverse().slice(-16);
   const maxSchedAbs = Math.max(1, ...recent.map((s) => s.faltas));
   const maxCell = useMemo(() => {
     let m = 1;
-    rows.forEach((r) => [...TASKS, ...posCols].forEach((h) => (m = Math.max(m, Number(r[h]) || 0))));
+    rows.forEach((r) => Object.values(r.counts).forEach((n) => (m = Math.max(m, n))));
     return m;
-  }, [rows, posCols]);
+  }, [rows]);
 
-  const k = data?.kpis;
+  const totalAbs = sched.reduce((sum, s) => sum + s.faltas, 0);
+  const k = loaded
+    ? {
+        escalas: sched.length,
+        faltas: totalAbs,
+        media_faltas: sched.length ? Math.round((totalAbs / sched.length) * 10) / 10 : 0,
+        ativos: people.length,
+        com_faltas: ranking.length,
+      }
+    : undefined;
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex flex-wrap items-center gap-2 border-b bg-background/85 px-5 py-2.5 backdrop-blur">
@@ -71,7 +96,7 @@ export function HistoricoPage({ init, onOpen }: { init: InitData; onOpen: (date:
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todas as equipes</SelectItem>
-            {init.teams.map((t) => (
+            {me.teams.map((t) => (
               <SelectItem key={t} value={t}>
                 {teamLabel(t)}
               </SelectItem>
@@ -99,18 +124,18 @@ export function HistoricoPage({ init, onOpen }: { init: InitData; onOpen: (date:
             </CardHeader>
             <div className="min-h-0 flex-1 space-y-[3px] overflow-y-auto px-3 py-2">
               {ranking.map((r, i) => (
-                <Tooltip key={r.id} side="right" content={<AbsenceList items={data?.absences[String(r.id)]} />}>
+                <Tooltip key={r.id} side="right" content={<AbsenceList items={r.absences} total={r.faltas} />}>
                 <div className="grid cursor-default grid-cols-[120px_1fr_24px] items-center gap-2 text-xs">
-                  <span className="truncate text-right">{r.Voluntarios}</span>
+                  <span className="truncate text-right">{r.name}</span>
                   <div className="h-3 rounded-sm bg-muted">
                     <motion.div
                       initial={{ width: 0 }}
-                      animate={{ width: `${(r.Total_Faltas / maxAbs) * 100}%` }}
+                      animate={{ width: `${(r.faltas / maxAbs) * 100}%` }}
                       transition={{ duration: 0.5, delay: Math.min(i * 0.015, 0.4) }}
                       className="h-full rounded-sm bg-red-500"
                     />
                   </div>
-                  <b className="tabular-nums">{r.Total_Faltas}</b>
+                  <b className="tabular-nums">{r.faltas}</b>
                 </div>
                 </Tooltip>
               ))}
@@ -212,7 +237,7 @@ export function HistoricoPage({ init, onOpen }: { init: InitData; onOpen: (date:
                   <th className="border-l px-1" colSpan={TASKS.length}>
                     Tarefas
                   </th>
-                  <th className="border-l px-1" colSpan={posCols.length}>
+                  <th className="border-l px-1" colSpan={POS_COLS.length}>
                     Posições do mapa
                   </th>
                 </tr>
@@ -225,7 +250,7 @@ export function HistoricoPage({ init, onOpen }: { init: InitData; onOpen: (date:
                       {TASK_SHORT[t]}
                     </th>
                   ))}
-                  {posCols.map((p, i) => (
+                  {POS_COLS.map((p, i) => (
                     <th key={p} className={cn("w-7 px-0.5 text-center", i === 0 && "border-l")}>
                       {p.slice(4)}
                     </th>
@@ -237,22 +262,22 @@ export function HistoricoPage({ init, onOpen }: { init: InitData; onOpen: (date:
                   <tr key={r.id} className="h-6 border-t hover:bg-muted/40">
                     <td className="sticky left-0 z-[1] truncate bg-card pl-3 font-medium">
                       <span className="inline-flex items-center gap-1.5">
-                        <i className={cn("size-1.5 rounded-full", r.Genero === "Feminino" ? "bg-rose-500" : "bg-sky-600")} />
-                        {r.Voluntarios}
+                        <i className={cn("size-1.5 rounded-full", r.gender === "Feminino" ? "bg-rose-500" : "bg-sky-600")} />
+                        {r.name}
                       </span>
                     </td>
-                    <td className="truncate px-1 text-muted-foreground">{teamLabel(String(r.Equipe)).replace("Domingo ", "Dom ").replace("Quarta-Feira ", "Qua ")}</td>
+                    <td className="truncate px-1 text-muted-foreground">{teamLabel(r.team).replace("Domingo ", "Dom ").replace("Quarta-Feira ", "Qua ")}</td>
                     <td className="px-1 text-center">
-                      {r.Total_Faltas ? (
-                        <Tooltip side="right" content={<AbsenceList items={data?.absences[String(r.id)]} />}>
-                          <b className="cursor-default text-red-600 tabular-nums">{r.Total_Faltas}</b>
+                      {r.faltas ? (
+                        <Tooltip side="right" content={<AbsenceList items={r.absences} total={r.faltas} />}>
+                          <b className="cursor-default text-red-600 tabular-nums">{r.faltas}</b>
                         </Tooltip>
                       ) : (
                         <span className="text-muted-foreground/40">·</span>
                       )}
                     </td>
-                    {[...TASKS, ...posCols].map((h, i) => {
-                      const v = Number(r[h]) || 0;
+                    {COLS.map((h, i) => {
+                      const v = r.counts[h] ?? 0;
                       return (
                         <td
                           key={h}
@@ -275,8 +300,8 @@ export function HistoricoPage({ init, onOpen }: { init: InitData; onOpen: (date:
 }
 
 /** Faltas de uma pessoa com data e motivo (mais recentes primeiro). */
-function AbsenceList({ items }: { items?: AbsenceItem[] }) {
-  if (!items?.length) return null;
+function AbsenceList({ items, total }: { items: AbsenceItem[]; total: number }) {
+  if (!items.length) return null;
   const shown = items.slice(0, 8);
   return (
     <div className="space-y-0.5 py-0.5">
@@ -287,7 +312,7 @@ function AbsenceList({ items }: { items?: AbsenceItem[] }) {
           <span>{a.reason || <i className="opacity-60">sem motivo</i>}</span>
         </div>
       ))}
-      {items.length > shown.length && <div className="opacity-70">+ {items.length - shown.length} anterior(es)</div>}
+      {total > shown.length && <div className="opacity-70">+ {total - shown.length} anterior(es)</div>}
     </div>
   );
 }

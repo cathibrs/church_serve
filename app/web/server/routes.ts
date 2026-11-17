@@ -1,7 +1,33 @@
-/** Rotas da API (/api/*). Mesmo contrato do servidor local antigo (app/escala/server.py). */
+/**
+ * API REST (/api/*). Cada endereço é um recurso e o verbo diz o que fazer com ele:
+ *
+ *   GET    /api/config                             público: endereço do login
+ *   GET    /api/me                                 quem está logado, papel, equipes e a data de hoje
+ *
+ *   GET    /api/volunteers[?team=]                 voluntários, com faltas e vezes que serviram
+ *   POST   /api/volunteers                         cadastra (201)
+ *   PATCH  /api/volunteers/:id                     altera só os campos enviados
+ *
+ *   GET    /api/schedules[?team=]                  escalas salvas (lista resumida)
+ *   GET    /api/schedules/:date[/:team]            folha do culto: equipe, presença e a escala salva
+ *   PUT    /api/schedules/:date/:team              grava a escala do culto (substitui a anterior)
+ *   POST   /api/schedules/:date/:team/suggestion   gera uma sugestão de escala (não grava)
+ *
+ *   PUT    /api/teams/:team/positions              posições ligadas por padrão para a equipe
+ *   GET    /api/history[?team=]                    quantas vezes cada um serviu em cada função
+ *
+ *   GET    /api/users                              acessos liberados (só admin)
+ *   PUT    /api/users/:email                       libera um e-mail ou muda papel e equipes (201 ou 200)
+ *   DELETE /api/users/:email                       remove o acesso (204)
+ *   POST   /api/users/:email/password              gera uma senha nova (201)
+ *
+ * Erros respondem { error, code? } com o status HTTP correspondente. O que é fixo (posições,
+ * regras) não passa por aqui: está em shared/catalog.ts e já vai dentro do site.
+ */
 import { generatePassword, neonAccounts, type Accounts } from "./accounts.ts";
 import { authenticate, denied, HttpError, type AuthOptions, type AuthUser } from "./auth.ts";
 import {
+  FACTORY_ACTIVE,
   isLastSunday,
   isoDate,
   localNow,
@@ -12,29 +38,52 @@ import {
 } from "./config.ts";
 import * as db from "./db.ts";
 import { activePositions, buildSchedule, validate } from "./engine.ts";
-import type { Assignment, GenerationResult, Issue } from "./models.ts";
+import type { Assignment, Issue, Volunteer } from "./models.ts";
 
 type Body = Record<string, any>;
-type Query = Record<string, string>;
 type Sql = db.Sql;
 
-/** O que as rotas de acessos precisam além do banco: o endereço do site e as contas de login. */
-interface Context {
+/** Tudo o que uma rota recebe. */
+interface Ctx {
+  sql: Sql;
+  user: AuthUser;
+  /** trechos variáveis do endereço (:id, :date, :team, :email) */
+  params: Record<string, string>;
+  query: Record<string, string>;
+  body: Body;
+  /** endereço do site e contas de login, usados pelas rotas de acessos */
   origin: string;
   accounts: Accounts;
 }
 
+/** Resposta com status diferente de 200 (201 criado, 204 sem conteúdo). */
+class Reply {
+  readonly status: number;
+  readonly data: unknown;
+
+  constructor(status: number, data?: unknown) {
+    this.status = status;
+    this.data = data;
+  }
+}
+
 const UserError = db.UserError;
+const notFound = (message: string) => new HttpError(404, message);
 
-// ====================================================================== auxiliares
+// ====================================================================== entradas
 
-function dateOf(value: unknown): string {
-  if (!value) return localNow().date;
+function dateOf(value: string): string {
   try {
-    return isoDate(String(value).slice(0, 10));
+    return isoDate(value);
   } catch {
     throw new UserError("Data inválida.");
   }
+}
+
+function idOf(value: string): number {
+  const id = Number(value);
+  if (!Number.isInteger(id) || id <= 0) throw notFound("Voluntário não encontrado.");
+  return id;
 }
 
 function idSet(value: unknown): Set<number> {
@@ -51,78 +100,14 @@ function codeList(value: unknown): string[] | null {
   return value.map(String);
 }
 
-/** Texto "AAAA-MM-DD HH:MM:SS" no horário de São Paulo. */
-function localStamp(at: Date | string): string {
-  const d = at instanceof Date ? at : new Date(at);
-  if (Number.isNaN(d.getTime())) return String(at);
-  const { date, time } = localNow(d);
-  return `${date} ${time}`;
-}
+const POSITION_BY_CODE = new Map(db.getPositions().map((p) => [p.code, p]));
 
-// ---------------------------------------------------------------- equipes de quem está logado
-
-/** Equipes que a pessoa pode usar: null = todas (admin); coordenador = só as dele. */
-const ownTeams = (user: AuthUser): string[] | null => (user.role === "admin" ? null : user.teams);
-
-function canUseTeam(user: AuthUser, team: string): boolean {
-  const mine = ownTeams(user);
-  return mine === null || mine.some((t) => db.normalizeTeam(t) === db.normalizeTeam(team));
-}
-
-/** Recusa a equipe que não é da pessoa. A API é quem garante isso, não a tela. */
-function checkTeam(user: AuthUser, team: string): string {
-  if (!canUseTeam(user, team)) throw denied("forbidden", `Você não coordena a equipe ${team.replaceAll("_", " ")}.`);
-  return team;
-}
-
-/**
- * Equipe informada em um pedido. Coordenador precisa informar uma equipe dele;
- * admin pode omitir (vale para todas).
- */
-function teamOf(user: AuthUser, value: unknown): string | null {
-  if (value) return checkTeam(user, String(value));
-  if (ownTeams(user) !== null) throw new UserError("Informe a equipe.");
-  return null;
-}
-
-async function availableTeams(sql: Sql, user: AuthUser): Promise<string[]> {
-  return ownTeams(user) ?? db.getAvailableTeams(sql);
-}
-
-/** Equipe da última escala salva no mesmo dia da semana; senão, a padrão. Sempre uma equipe da pessoa. */
-async function suggestTeam(sql: Sql, date: string, user: AuthUser): Promise<string> {
-  const mine = ownTeams(user);
-  const weekday = weekdayName(date);
-  const last = await db.lastTeamFor(sql, weekday, mine);
-  if (last) return last;
-  const fallback = teamForDate(date);
-  if (mine === null || canUseTeam(user, fallback)) return fallback;
-  return mine.find((t) => t.startsWith(weekday)) ?? mine[0];
-}
-
-const DEFAULT_POSITIONS_KEY = "posicoes_padrao";
-
-/** Posições ativas padrão: as da equipe, se ela guardou as suas; senão as gerais; senão as de fábrica. */
-async function defaultActive(sql: Sql, team: string | null = null): Promise<string[]> {
-  const positions = db.getPositions();
-  const keys = team ? [`${DEFAULT_POSITIONS_KEY}:${team}`, DEFAULT_POSITIONS_KEY] : [DEFAULT_POSITIONS_KEY];
-  for (const key of keys) {
-    const saved = await db.getMeta<string[] | null>(sql, key, null);
-    if (saved?.length) {
-      const codes = new Set(positions.map((p) => p.code));
-      return saved.filter((c) => codes.has(c));
-    }
-  }
-  return positions.filter((p) => p.normal_active && !p.event_only).map((p) => p.code);
-}
-
-function assignmentsOf(body: Body): Assignment[] {
-  const positions = new Map(db.getPositions().map((p) => [p.code, p]));
-  const list = body.assignments ?? [];
+/** Escala enviada pelo site: só posições que existem; nome e categoria vêm do catálogo. */
+function assignmentsOf(list: unknown): Assignment[] {
   if (!Array.isArray(list)) throw new UserError("Escala inválida.");
   const out: Assignment[] = [];
   list.forEach((a: Body, i: number) => {
-    const p = positions.get(String(a?.position_code));
+    const p = POSITION_BY_CODE.get(String(a?.position_code));
     const volunteerId = Number(a?.volunteer_id);
     if (!p || !a?.volunteer_id || !Number.isInteger(volunteerId)) return;
     out.push({
@@ -137,28 +122,192 @@ function assignmentsOf(body: Body): Assignment[] {
   return out;
 }
 
-async function validateFor(
-  sql: Sql,
-  assignments: Assignment[],
-  team: string | null,
-  date: string,
-  present: Set<number>,
-): Promise<Issue[]> {
-  const vols = new Map((await db.getVolunteers(sql, { activeOnly: false, team })).map((v) => [v.id, v]));
-  const positions = new Map(db.getPositions().map((p) => [p.code, p]));
-  const absent = present.size ? new Set([...vols.keys()].filter((id) => !present.has(id))) : new Set<number>();
-  const mustPlace = new Set([...present].filter((id) => vols.get(id)?.active));
-  return validate(assignments, vols, positions, isLastSunday(date), absent, mustPlace);
+/** Texto "AAAA-MM-DD HH:MM:SS" no horário de São Paulo. */
+function localStamp(at: Date | string): string {
+  const d = at instanceof Date ? at : new Date(at);
+  if (Number.isNaN(d.getTime())) return String(at);
+  const { date, time } = localNow(d);
+  return `${date} ${time}`;
 }
 
-async function generate(
-  sql: Sql,
-  present: Set<number>,
-  activeCodes: Set<string> | null,
-  team: string | null,
-  date: string,
-): Promise<GenerationResult> {
-  const volunteers = (await db.getVolunteers(sql, { team })).filter((v) => present.has(v.id));
+// ====================================================================== equipes de quem está logado
+
+/** Equipes que a pessoa pode usar: null = todas (admin); coordenador = só as dele. */
+const ownTeams = (user: AuthUser): db.Teams => (user.role === "admin" ? null : user.teams);
+
+function canUseTeam(user: AuthUser, team: string): boolean {
+  const mine = ownTeams(user);
+  return mine === null || mine.some((t) => db.normalizeTeam(t) === db.normalizeTeam(team));
+}
+
+/** Recusa a equipe que não é da pessoa. A API é quem garante isso, não a tela. */
+function checkTeam(user: AuthUser, team: string): string {
+  if (!canUseTeam(user, team)) throw denied("forbidden", `Você não coordena a equipe ${team.replaceAll("_", " ")}.`);
+  return team;
+}
+
+/** Equipes de uma listagem: a do filtro (conferida) ou, sem filtro, todas as da pessoa. */
+const scopeOf = (user: AuthUser, team: string | undefined): db.Teams => (team ? [checkTeam(user, team)] : ownTeams(user));
+
+/** Equipe da última escala salva no mesmo dia da semana; senão, a padrão. Sempre uma equipe da pessoa. */
+async function suggestTeam(sql: Sql, date: string, user: AuthUser): Promise<string> {
+  const mine = ownTeams(user);
+  const weekday = weekdayName(date);
+  const last = await db.lastTeamFor(sql, weekday, mine);
+  if (last) return last;
+  const fallback = teamForDate(date);
+  if (mine === null || canUseTeam(user, fallback)) return fallback;
+  return mine.find((t) => t.startsWith(weekday)) ?? mine[0];
+}
+
+const DEFAULT_POSITIONS_KEY = "posicoes_padrao";
+
+/** Posições ligadas por padrão: as da equipe, se ela guardou as suas; senão as gerais; senão as de fábrica. */
+async function defaultActive(sql: Sql, team: string): Promise<string[]> {
+  const keys = [`${DEFAULT_POSITIONS_KEY}:${team}`, DEFAULT_POSITIONS_KEY];
+  const saved = await db.getMetaMany(sql, keys);
+  for (const key of keys) {
+    const codes = saved.get(key);
+    if (Array.isArray(codes) && codes.length) return codes.filter((c) => POSITION_BY_CODE.has(c));
+  }
+  return FACTORY_ACTIVE;
+}
+
+// ====================================================================== regras da escala
+
+/** Regras quebradas na escala. `roster`: todos da equipe (ativos e inativos), já carregados. */
+function issuesOf(roster: Volunteer[], assignments: Assignment[], date: string, present: Set<number>): Issue[] {
+  const vols = new Map(roster.map((v) => [v.id, v]));
+  const absent = present.size ? new Set([...vols.keys()].filter((id) => !present.has(id))) : new Set<number>();
+  const mustPlace = new Set([...present].filter((id) => vols.get(id)?.active));
+  return validate(assignments, vols, POSITION_BY_CODE, isLastSunday(date), absent, mustPlace);
+}
+
+// ====================================================================== sessão
+
+async function getMe({ sql, user }: Ctx) {
+  return {
+    email: user.email,
+    role: user.role,
+    teams: ownTeams(user) ?? (await db.getAvailableTeams(sql)),
+    today: localNow().date,
+  };
+}
+
+// ====================================================================== voluntários
+
+async function listVolunteers({ sql, user, query }: Ctx) {
+  return db.getVolunteersWithStats(sql, scopeOf(user, query.team));
+}
+
+async function createVolunteer({ sql, user, body }: Ctx) {
+  // coordenador só cadastra em equipe dele
+  if (ownTeams(user) !== null) checkTeam(user, db.cleanTeam(body.team));
+  return new Reply(201, await db.createVolunteer(sql, body));
+}
+
+async function updateVolunteer({ sql, user, params, body }: Ctx) {
+  const id = idOf(params.id);
+  if (ownTeams(user) !== null) {
+    // coordenador só altera quem já é de uma equipe dele, e não manda ninguém para outra
+    if (body.team !== undefined && body.team !== null) checkTeam(user, db.cleanTeam(body.team));
+    const current = await db.getVolunteerTeam(sql, id);
+    if (current === null) throw notFound("Voluntário não encontrado.");
+    checkTeam(user, current);
+  }
+  const saved = await db.updateVolunteer(sql, id, body);
+  if (!saved) throw notFound("Voluntário não encontrado.");
+  return saved;
+}
+
+// ====================================================================== escalas
+
+async function listSchedules({ sql, user, query }: Ctx) {
+  return db.listSchedules(sql, scopeOf(user, query.team));
+}
+
+/**
+ * Folha do culto: tudo o que a tela da escala precisa em um pedido só. Sem equipe no
+ * endereço, vale a sugerida para o dia.
+ */
+async function getSheet({ sql, user, params }: Ctx) {
+  const date = dateOf(params.date);
+  const team = params.team ? checkTeam(user, params.team) : await suggestTeam(sql, date, user);
+  const [volunteers, schedule, active] = await Promise.all([
+    db.getRoster(sql, team),
+    db.findSchedule(sql, date, team),
+    defaultActive(sql, team),
+  ]);
+  let saved = null;
+  let issues: Issue[] = [];
+  if (schedule) {
+    saved = {
+      id: schedule.id,
+      created_at: localStamp(schedule.created_at),
+      assignments: schedule.assignments,
+      absent_ids: [...schedule.absent.keys()].sort((a, b) => a - b),
+      absent_reasons: Object.fromEntries([...schedule.absent].filter(([, reason]) => reason).map(([id, r]) => [String(id), r])),
+      active_codes: schedule.active_codes,
+    };
+    // confere a escala salva com o cadastro de hoje (alguém pode ter mudado de permissão ou saído)
+    const names = new Map(volunteers.map((v) => [v.id, v.name]));
+    const byCode = new Map(schedule.assignments.map((a) => [a.position_code, a]));
+    const current = assignmentsOf(
+      [...byCode.values()].map((a) => ({ ...a, volunteer_name: names.get(a.volunteer_id) ?? a.volunteer_name })),
+    );
+    const present = new Set(volunteers.filter((v) => v.active && !schedule.absent.has(v.id)).map((v) => v.id));
+    issues = issuesOf(volunteers, current, date, present);
+  }
+  return {
+    date,
+    weekday: weekdayName(date),
+    last_sunday: isLastSunday(date),
+    team,
+    volunteers,
+    default_active: active,
+    saved,
+    issues,
+  };
+}
+
+/** Grava a escala do culto e devolve as regras quebradas: um pedido só em vez de validar e salvar. */
+async function putSchedule({ sql, user, params, body }: Ctx) {
+  const date = dateOf(params.date);
+  const team = checkTeam(user, params.team);
+  const present = idSet(body.present_ids);
+  const assignments = assignmentsOf(body.assignments ?? []);
+  const reasons = new Map<number, string>();
+  for (const [id, reason] of Object.entries(body.absent_reasons ?? {})) {
+    if (reason) reasons.set(Number(id), String(reason));
+  }
+  const roster = await db.getVolunteers(sql, { activeOnly: false, teams: [team] });
+  if (ownTeams(user) !== null) {
+    // coordenador só escala e marca presença de gente da equipe dele
+    const everyone = new Set(roster.map((v) => v.id));
+    const outsiders = [...present, ...assignments.map((a) => a.volunteer_id)].filter((id) => !everyone.has(id));
+    if (outsiders.length) throw new UserError("A escala tem pessoas que não são desta equipe.");
+  }
+  const id = await db.saveSchedule(sql, {
+    serviceDate: date,
+    serviceType: weekdayName(date),
+    team,
+    assignments,
+    presentIds: present,
+    allVolunteerIds: roster.filter((v) => v.active).map((v) => v.id),
+    activeCodes: codeList(body.active_codes),
+    absentReasons: reasons,
+  });
+  return { id, saved_at: localNow().time, issues: issuesOf(roster, assignments, date, present) };
+}
+
+/** Sugestão de escala para os presentes. Não grava nada: o site grava com PUT quando aceita. */
+async function suggestSchedule({ sql, user, params, body }: Ctx) {
+  const date = dateOf(params.date);
+  const team = checkTeam(user, params.team);
+  const present = idSet(body.present_ids);
+  const codes = codeList(body.active_codes);
+  const roster = await db.getVolunteers(sql, { activeOnly: false, teams: [team] });
+  const volunteers = roster.filter((v) => v.active && present.has(v.id));
   const ids = volunteers.map((v) => v.id);
   const [stats, lastReception, lastMap, lastPositions, lastAltarGender] = await Promise.all([
     db.getHistoryStats(sql, ids),
@@ -170,7 +319,7 @@ async function generate(
   const all = db.getPositions();
   const result = buildSchedule(
     volunteers,
-    activePositions(all, activeCodes),
+    activePositions(all, codes && new Set(codes)),
     {
       stats,
       last_reception_ids: lastReception,
@@ -184,276 +333,170 @@ async function generate(
   if ([...present].some((id) => !ids.includes(id))) {
     result.warnings.push("Alguns marcados como presentes não pertencem à equipe ou estão inativos.");
   }
-  return result;
-}
-
-// ====================================================================== API
-
-async function apiInit(sql: Sql, _q: Query, user: AuthUser) {
-  const today = localNow().date;
-  const [teams, team] = await Promise.all([availableTeams(sql, user), suggestTeam(sql, today, user)]);
   return {
-    today,
-    teams,
-    team,
-    positions: db.getPositions(),
-    default_active: await defaultActive(sql, team),
-    user: { email: user.email, role: user.role, teams: user.teams },
+    assignments: result.assignments,
+    warnings: result.warnings,
+    issues: issuesOf(roster, result.assignments, date, present),
   };
 }
 
-async function apiDay(sql: Sql, q: Query, user: AuthUser) {
-  const date = dateOf(q.date);
-  const suggested = await suggestTeam(sql, date, user);
-  const team = q.team ? checkTeam(user, q.team) : suggested;
-  const [vols, absences, schedule, active] = await Promise.all([
-    db.getVolunteers(sql, { activeOnly: false, team }),
-    db.absenceInfo(sql),
-    db.findSchedule(sql, date, team),
-    defaultActive(sql, team),
-  ]);
-  const saved = schedule && {
-    id: schedule.id,
-    created_at: localStamp(schedule.created_at),
-    assignments: schedule.assignments,
-    absent_ids: [...schedule.absent.keys()].sort((a, b) => a - b),
-    absent_reasons: Object.fromEntries([...schedule.absent].filter(([, reason]) => reason).map(([id, r]) => [String(id), r])),
-    active_codes: schedule.active_codes,
-  };
-  return {
-    date,
-    weekday: weekdayName(date),
-    last_sunday: isLastSunday(date),
-    team,
-    suggested_team: suggested,
-    volunteers: vols.map((v) => ({ ...v, faltas: absences.get(v.id)?.total ?? 0 })),
-    default_active: active,
-    saved,
-  };
+// ====================================================================== equipes e histórico
+
+async function putTeamPositions({ sql, user, params, body }: Ctx) {
+  const team = checkTeam(user, params.team);
+  const codes = [...new Set(codeList(body.codes) ?? [])].filter((c) => POSITION_BY_CODE.has(c)).sort();
+  await db.setMeta(sql, `${DEFAULT_POSITIONS_KEY}:${team}`, codes);
+  return { codes };
 }
 
-async function apiGenerate(sql: Sql, body: Body, user: AuthUser) {
-  const date = dateOf(body.date);
-  const team = teamOf(user, body.team);
-  const present = idSet(body.present_ids);
-  const codes = codeList(body.active_codes);
-  const res = await generate(sql, present, codes && new Set(codes), team, date);
-  return {
-    assignments: res.assignments,
-    warnings: res.warnings,
-    issues: await validateFor(sql, res.assignments, team, date, present),
-  };
+async function getHistory({ sql, user, query }: Ctx) {
+  return db.getHistory(sql, scopeOf(user, query.team));
 }
 
-async function apiValidate(sql: Sql, body: Body, user: AuthUser) {
-  const date = dateOf(body.date);
-  const team = teamOf(user, body.team);
-  return { issues: await validateFor(sql, assignmentsOf(body), team, date, idSet(body.present_ids)) };
-}
-
-async function apiSave(sql: Sql, body: Body, user: AuthUser) {
-  const date = dateOf(body.date);
-  const team = teamOf(user, body.team) ?? (await suggestTeam(sql, date, user));
-  const present = idSet(body.present_ids);
-  const reasons = new Map<number, string>();
-  for (const [id, reason] of Object.entries(body.absent_reasons ?? {})) {
-    if (reason) reasons.set(Number(id), String(reason));
-  }
-  const assignments = assignmentsOf(body);
-  const teamVols = await db.getVolunteers(sql, { team });
-  if (ownTeams(user) !== null) {
-    // coordenador só escala e marca presença de gente da equipe dele
-    const everyone = new Set((await db.getVolunteers(sql, { activeOnly: false, team })).map((v) => v.id));
-    const outsiders = [...present, ...assignments.map((a) => a.volunteer_id)].filter((id) => !everyone.has(id));
-    if (outsiders.length) throw new UserError("A escala tem pessoas que não são desta equipe.");
-  }
-  const scheduleId = await db.saveSchedule(sql, {
-    serviceDate: date,
-    serviceType: weekdayName(date),
-    team,
-    assignments,
-    presentIds: present,
-    allVolunteerIds: teamVols.map((v) => v.id),
-    activeCodes: codeList(body.active_codes),
-    absentReasons: reasons,
-  });
-  return { schedule_id: scheduleId, warnings: [] as string[], saved_at: localNow().time };
-}
-
-async function apiVolunteer(sql: Sql, body: Body, user: AuthUser) {
-  const id = body.id ? Number(body.id) : null;
-  if (ownTeams(user) !== null) {
-    // coordenador só cadastra na equipe dele e só altera voluntário que já é dela
-    checkTeam(user, db.cleanTeam(body.team));
-    if (id) {
-      const current = await db.getVolunteerTeam(sql, id);
-      if (current === null) throw new UserError("Voluntário não encontrado.");
-      checkTeam(user, current);
-    }
-  }
-  return { id: await db.upsertVolunteer(sql, { ...body, id }) };
-}
-
-/** Limita uma lista às equipes da pessoa (admin: tudo). */
-function onlyMine<T>(user: AuthUser, items: T[], teamOfItem: (item: T) => string): T[] {
-  return ownTeams(user) === null ? items : items.filter((item) => canUseTeam(user, teamOfItem(item)));
-}
-
-async function apiVolunteers(sql: Sql, q: Query, user: AuthUser) {
-  const team = q.team ? checkTeam(user, q.team) : null;
-  const [all, absences, served, teams] = await Promise.all([
-    db.getVolunteers(sql, { activeOnly: false, team }),
-    db.absenceInfo(sql),
-    db.serviceInfo(sql),
-    availableTeams(sql, user),
-  ]);
-  const vols = onlyMine(user, all, (v) => v.team);
-  return {
-    volunteers: vols.map((v) => ({
-      ...v,
-      faltas: absences.get(v.id)?.total ?? 0,
-      vezes: served.get(v.id)?.vezes ?? 0,
-      ultima_vez: served.get(v.id)?.ultima ?? null,
-    })),
-    teams,
-  };
-}
-
-/** Guarda as posições ativas padrão: da equipe informada ou, sem equipe (só admin), as gerais. */
-async function apiPositionsDefault(sql: Sql, body: Body, user: AuthUser) {
-  const codes = [...new Set(codeList(body.codes) ?? [])].sort();
-  const team = teamOf(user, body.team);
-  await db.setMeta(sql, team ? `${DEFAULT_POSITIONS_KEY}:${team}` : DEFAULT_POSITIONS_KEY, codes);
-  return { default_active: codes };
-}
-
-async function apiHistory(sql: Sql, q: Query, user: AuthUser) {
-  const team = q.team ? checkTeam(user, q.team) : null;
-  const [allSchedules, allRows, details] = await Promise.all([
-    db.listSchedules(sql, 200),
-    db.getHistoryMatrix(sql, team),
-    db.absenceDetails(sql),
-  ]);
-  const rows = onlyMine(user, allRows, (r) => String(r.Equipe));
-  const schedules = onlyMine(user, team ? allSchedules.filter((s) => s.team === team) : allSchedules, (s) => s.team).map(
-    (s) => ({ ...s, created_at: localStamp(s.created_at) }),
-  );
-  const active = rows.filter((r) => r.Ativo);
-  const totalAbsences = schedules.reduce((sum, s) => sum + s.faltas, 0);
-  const ids = new Set(rows.map((r) => r.id as number));
-  return {
-    headers: db.HISTORY_HEADERS,
-    rows,
-    schedules,
-    kpis: {
-      escalas: schedules.length,
-      faltas: totalAbsences,
-      media_faltas: schedules.length ? Math.round((totalAbsences / schedules.length) * 10) / 10 : 0,
-      ativos: active.length,
-      com_faltas: active.filter((r) => r.Total_Faltas).length,
-    },
-    absences: Object.fromEntries([...details].filter(([id]) => ids.has(id)).map(([id, list]) => [String(id), list])),
-  };
-}
-
-// ---------------------------------------------------------------- acessos (só admin)
+// ====================================================================== acessos (só admin)
 
 function requireAdmin(user: AuthUser): void {
   if (user.role !== "admin") throw denied("forbidden", "Só administradores podem gerenciar os acessos.");
 }
 
-/** `password`: senha recém-criada, mostrada uma única vez ao admin (o sistema não a guarda). */
-async function usersPayload(sql: Sql, user: AuthUser, password: { email: string; value: string } | null = null) {
-  const [users, teams] = await Promise.all([db.listAppUsers(sql), db.getAvailableTeams(sql)]);
-  return { me: user.email, teams, password, users: users.map((u) => ({ ...u, created_at: localStamp(u.created_at) })) };
-}
+const toUser = (u: db.AppUser) => ({ ...u, created_at: localStamp(u.created_at) });
 
 /** Nome para a conta de login: o informado ou, na falta, o começo do e-mail. */
 const accountName = (value: unknown, email: string) => db.cleanName(value).slice(0, 80) || email.split("@")[0];
 
-async function apiUsers(sql: Sql, _q: Query, user: AuthUser) {
+async function listUsers({ sql, user }: Ctx) {
   requireAdmin(user);
-  return usersPayload(sql, user);
+  return (await db.listAppUsers(sql)).map(toUser);
 }
 
 /** Recusa mudanças que deixariam o sistema sem admin ou tirariam o acesso de quem está pedindo. */
-async function guardAdminChange(sql: Sql, user: AuthUser, email: string, next: db.Role | null) {
-  const current = (await db.getAccess(sql, email))?.role;
-  if (current !== "admin" || next === "admin") return;
+async function guardAdminChange(sql: Sql, user: AuthUser, email: string, current: db.Access | null, next: db.Role | null) {
+  if (current?.role !== "admin" || next === "admin") return;
   if (email === user.email) {
     throw new UserError("Você não pode tirar o seu próprio acesso de administrador. Peça a outro administrador.");
   }
   if ((await db.countAdmins(sql)) <= 1) throw new UserError("O sistema precisa de pelo menos um administrador.");
 }
 
-async function apiUserSave(sql: Sql, body: Body, user: AuthUser, ctx: Context) {
+/**
+ * Libera um e-mail ou muda o papel e as equipes de quem já está liberado. Quem ainda não tem
+ * conta de login ganha uma, com senha aleatória que volta aqui uma única vez (não é guardada).
+ */
+async function putUser({ sql, user, params, body, origin, accounts }: Ctx) {
   requireAdmin(user);
-  const email = db.cleanEmail(body.email);
+  const email = db.cleanEmail(params.email);
   const role = db.cleanRole(body.role ?? "coordinator");
+  const [valid, current, account] = await Promise.all([
+    role === "admin" ? [] : db.getAvailableTeams(sql),
+    db.getAccess(sql, email),
+    db.getAccountName(sql, email),
+  ]);
   // coordenador sempre tem pelo menos uma equipe; admin não tem equipe (vê todas)
-  const teams = role === "admin" ? [] : db.cleanTeams(body.teams, await db.getAvailableTeams(sql));
+  const teams = role === "admin" ? [] : db.cleanTeams(body.teams, valid);
   if (role === "coordinator" && !teams.length) throw new UserError("Escolha pelo menos uma equipe para o coordenador.");
-  await guardAdminChange(sql, user, email, role);
-  // Quem ainda não tem conta de login ganha uma, com senha aleatória que o admin vê agora.
+  await guardAdminChange(sql, user, email, current, role);
   let password: string | null = null;
-  if (!(await db.getAccountName(sql, email))) {
+  if (!account) {
     const candidate = generatePassword();
-    const created = await ctx.accounts.create(sql, { email, name: accountName(body.name, email), password: candidate }, ctx.origin);
-    if (created) password = candidate;
+    if (await accounts.create(sql, { email, name: accountName(body.name, email), password: candidate }, origin)) {
+      password = candidate;
+    }
   }
   await db.upsertAppUser(sql, email, { role, teams }, user.email);
-  return usersPayload(sql, user, password ? { email, value: password } : null);
+  const [saved] = await db.listAppUsers(sql, email);
+  return new Reply(current ? 200 : 201, { user: toUser(saved), password });
+}
+
+async function deleteUser({ sql, user, params }: Ctx) {
+  requireAdmin(user);
+  const email = db.cleanEmail(params.email);
+  if (email === user.email) throw new UserError("Você não pode remover o seu próprio acesso.");
+  await guardAdminChange(sql, user, email, await db.getAccess(sql, email), null);
+  await db.removeAppUser(sql, email);
+  return new Reply(204);
 }
 
 /** Gera uma senha nova para alguém já liberado: a conta de login é recriada com ela. */
-async function apiUserPassword(sql: Sql, body: Body, user: AuthUser, ctx: Context) {
+async function resetPassword({ sql, user, params, origin, accounts }: Ctx) {
   requireAdmin(user);
-  const email = db.cleanEmail(body.email);
+  const email = db.cleanEmail(params.email);
   if (email === user.email) throw new UserError('Para trocar a sua própria senha, use "Alterar senha" no menu.');
-  if (!(await db.getAccess(sql, email))) throw new UserError("Esse e-mail não está liberado.");
-  const current = await db.getAccountName(sql, email);
+  const [access, account] = await Promise.all([db.getAccess(sql, email), db.getAccountName(sql, email)]);
+  if (!access) throw notFound("Esse e-mail não está liberado.");
   const password = generatePassword();
-  await ctx.accounts.remove(sql, email);
-  const created = await ctx.accounts.create(sql, { email, name: accountName(current?.name, email), password }, ctx.origin);
+  await accounts.remove(sql, email);
+  const created = await accounts.create(sql, { email, name: accountName(account?.name, email), password }, origin);
   if (!created) throw new HttpError(502, "Não foi possível recriar a conta de login. Tente de novo.");
-  return usersPayload(sql, user, { email, value: password });
+  const [saved] = await db.listAppUsers(sql, email);
+  return new Reply(201, { user: toUser(saved), password });
 }
 
-async function apiUserRemove(sql: Sql, body: Body, user: AuthUser) {
-  requireAdmin(user);
-  const email = db.cleanEmail(body.email);
-  if (email === user.email) throw new UserError("Você não pode remover o seu próprio acesso.");
-  await guardAdminChange(sql, user, email, null);
-  await db.removeAppUser(sql, email);
-  return usersPayload(sql, user);
+// ====================================================================== rotas
+
+type Handler = (ctx: Ctx) => Promise<unknown>;
+
+const ROUTES: { method: string; parts: string[]; handler: Handler }[] = (
+  [
+    ["GET", "/api/me", getMe],
+    ["GET", "/api/volunteers", listVolunteers],
+    ["POST", "/api/volunteers", createVolunteer],
+    ["PATCH", "/api/volunteers/:id", updateVolunteer],
+    ["GET", "/api/schedules", listSchedules],
+    ["GET", "/api/schedules/:date", getSheet],
+    ["GET", "/api/schedules/:date/:team", getSheet],
+    ["PUT", "/api/schedules/:date/:team", putSchedule],
+    ["POST", "/api/schedules/:date/:team/suggestion", suggestSchedule],
+    ["PUT", "/api/teams/:team/positions", putTeamPositions],
+    ["GET", "/api/history", getHistory],
+    ["GET", "/api/users", listUsers],
+    ["PUT", "/api/users/:email", putUser],
+    ["DELETE", "/api/users/:email", deleteUser],
+    ["POST", "/api/users/:email/password", resetPassword],
+  ] as [string, string, Handler][]
+).map(([method, path, handler]) => ({ method, parts: path.split("/").filter(Boolean), handler }));
+
+/** Acha a rota do pedido e separa os trechos variáveis do endereço. */
+function match(method: string, path: string): { handler: Handler; params: Record<string, string> } | null {
+  const parts = path.split("/").filter(Boolean);
+  for (const route of ROUTES) {
+    if (route.method !== method || route.parts.length !== parts.length) continue;
+    const params: Record<string, string> = {};
+    const fits = route.parts.every((expected, i) => {
+      if (!expected.startsWith(":")) return expected === parts[i];
+      try {
+        params[expected.slice(1)] = decodeURIComponent(parts[i]);
+        return true;
+      } catch {
+        return false; // %xx malformado
+      }
+    });
+    if (fits) return { handler: route.handler, params };
+  }
+  return null;
 }
-
-const GET_ROUTES: Record<string, (sql: Sql, q: Query, user: AuthUser) => Promise<unknown>> = {
-  "/api/init": apiInit,
-  "/api/day": apiDay,
-  "/api/volunteers": apiVolunteers,
-  "/api/history": apiHistory,
-  "/api/users": apiUsers,
-};
-
-const POST_ROUTES: Record<string, (sql: Sql, body: Body, user: AuthUser, ctx: Context) => Promise<unknown>> = {
-  "/api/positions/default": apiPositionsDefault,
-  "/api/generate": apiGenerate,
-  "/api/validate": apiValidate,
-  "/api/save": apiSave,
-  "/api/volunteer": apiVolunteer,
-  "/api/users": apiUserSave,
-  "/api/users/remove": apiUserRemove,
-  "/api/users/password": apiUserPassword,
-};
 
 // ====================================================================== HTTP
 
-function json(data: unknown, status = 200): Response {
+function respond(data: unknown, status = 200, cache = "no-store"): Response {
+  if (status === 204) return new Response(null, { status, headers: { "Cache-Control": cache } });
   return new Response(JSON.stringify(data), {
     status,
-    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
+    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": cache },
   });
+}
+
+const failure = (status: number, error: string, code?: string) => respond({ error, code }, status);
+
+async function bodyOf(request: Request): Promise<Body> {
+  if (request.method === "GET" || request.method === "DELETE") return {};
+  let body: unknown;
+  try {
+    body = JSON.parse((await request.text()) || "{}");
+  } catch {
+    throw new HttpError(400, "JSON inválido");
+  }
+  if (typeof body !== "object" || body === null || Array.isArray(body)) throw new HttpError(400, "JSON inválido");
+  return body as Body;
 }
 
 export interface HandleOptions extends AuthOptions {
@@ -466,32 +509,32 @@ export async function handle(request: Request, opts: HandleOptions = {}): Promis
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/+$/, "");
   try {
-    const get = request.method === "GET" ? GET_ROUTES[path] : undefined;
-    const post = request.method === "POST" ? POST_ROUTES[path] : undefined;
-    // Pública: o navegador precisa do endereço do login antes de existir sessão.
+    // Pública: o navegador precisa do endereço do login antes de existir sessão. Como só muda
+    // quando o site é publicado de novo, o navegador pode guardar por uma hora e abrir mais rápido.
     if (request.method === "GET" && path === "/api/config") {
-      return json({ auth_url: process.env.NEON_AUTH_BASE_URL || null });
+      const authUrl = process.env.NEON_AUTH_BASE_URL || null;
+      return respond({ auth_url: authUrl }, 200, authUrl ? "public, max-age=3600" : "no-store");
     }
-    if (!get && !post) return json({ error: "rota inválida" }, 404);
+    const route = match(request.method, path);
+    if (!route) return failure(404, "rota inválida");
 
     const sql = opts.sql ?? db.connect();
     const user = await authenticate(request, sql, opts);
-
-    if (get) return json(await get(sql, Object.fromEntries(url.searchParams), user));
-    let body: unknown;
-    try {
-      body = JSON.parse((await request.text()) || "{}");
-    } catch {
-      return json({ error: "JSON inválido" }, 400);
-    }
-    if (typeof body !== "object" || body === null || Array.isArray(body)) return json({ error: "JSON inválido" }, 400);
-    const ctx: Context = { origin: url.origin, accounts: opts.accounts ?? neonAccounts };
-    return json(await post!(sql, body as Body, user, ctx));
+    const result = await route.handler({
+      sql,
+      user,
+      params: route.params,
+      query: Object.fromEntries(url.searchParams),
+      body: await bodyOf(request),
+      origin: url.origin,
+      accounts: opts.accounts ?? neonAccounts,
+    });
+    return result instanceof Reply ? respond(result.data, result.status) : respond(result);
   } catch (e) {
-    if (e instanceof HttpError) return json({ error: e.message, code: e.code }, e.status);
-    if (e instanceof UserError) return json({ error: e.message }, 400);
-    if (e instanceof db.ConfigError) return json({ error: e.message }, 500);
+    if (e instanceof HttpError) return failure(e.status, e.message, e.code);
+    if (e instanceof UserError) return failure(400, e.message);
+    if (e instanceof db.ConfigError) return failure(500, e.message);
     console.error(e);
-    return json({ error: "Erro interno. Tente de novo em instantes." }, 500);
+    return failure(500, "Erro interno. Tente de novo em instantes.");
   }
 }

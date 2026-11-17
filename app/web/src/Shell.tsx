@@ -5,7 +5,7 @@
 import { useCallback, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { Toaster } from "sonner";
-import type { InitData } from "@/lib/api";
+import type { Me } from "@/lib/api";
 import { AppSidebar, type Page } from "@/components/AppSidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { EscalaPage } from "@/pages/Escala";
@@ -14,8 +14,8 @@ import { HistoricoPage } from "@/pages/Historico";
 import { AcessosPage } from "@/pages/Acessos";
 import { ChangePassword } from "@/components/ChangePassword";
 
-export default function Shell({ init, onSignOut }: { init: InitData; onSignOut: () => void }) {
-  const isAdmin = init.user.role === "admin";
+export default function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
+  const isAdmin = me.role === "admin";
   const [page, setPage] = useState<Page>(() => {
     const h = location.hash.slice(1);
     if (h === "voluntarios" || h === "historico") return h;
@@ -52,7 +52,7 @@ export default function Shell({ init, onSignOut }: { init: InitData; onSignOut: 
           onPage={setPage}
           onSignOut={onSignOut}
           onChangePassword={() => setChangingPassword(true)}
-          userEmail={init.user.email}
+          userEmail={me.email}
           isAdmin={isAdmin}
           collapsed={collapsed}
           onToggle={toggleSidebar}
@@ -67,18 +67,18 @@ export default function Shell({ init, onSignOut }: { init: InitData; onSignOut: 
               transition={{ duration: 0.16 }}
               className="h-full"
             >
-              {page === "escala" && <EscalaPage init={init} goto={goto} onGotoDone={() => setGoto(null)} />}
-              {page === "voluntarios" && <VoluntariosPage init={init} />}
+              {page === "escala" && <EscalaPage me={me} goto={goto} onGotoDone={() => setGoto(null)} />}
+              {page === "voluntarios" && <VoluntariosPage me={me} />}
               {page === "historico" && (
                 <HistoricoPage
-                  init={init}
+                  me={me}
                   onOpen={(date, team) => {
                     setGoto({ date, team });
                     setPage("escala");
                   }}
                 />
               )}
-              {page === "acessos" && isAdmin && <AcessosPage />}
+              {page === "acessos" && isAdmin && <AcessosPage me={me} />}
             </motion.div>
           </AnimatePresence>
         </main>

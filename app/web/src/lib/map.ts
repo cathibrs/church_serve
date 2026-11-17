@@ -1,4 +1,4 @@
-import type { DayData, Position, Volunteer } from "./api";
+import type { Position, Sheet, Volunteer } from "./api";
 import { REC } from "./rules";
 import { br, teamLabel } from "./utils";
 
@@ -8,7 +8,7 @@ export interface MapState {
   assign: Record<string, number>;
   vols: Record<number, Volunteer>;
   bad: Set<string>;
-  day: DayData | null;
+  day: Sheet | null;
 }
 
 const esc = (s: unknown) =>

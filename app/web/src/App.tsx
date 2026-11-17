@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
-import { api, ApiError, type InitData } from "@/lib/api";
+import { api, ApiError, type Me } from "@/lib/api";
 import { authClient, authConfigured, clearToken, signOut } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { AccessNotice, LoginPage } from "@/pages/Login";
@@ -53,12 +53,12 @@ export default function App({ serverDown = false }: { serverDown?: boolean }) {
 }
 
 /**
- * Valida na API antes de mostrar qualquer coisa: /api/init confere o token, o e-mail
+ * Valida na API antes de mostrar qualquer coisa: /api/me confere o token, o e-mail
  * confirmado e o acesso liberado. Até a resposta chegar só aparece "Carregando", e o
  * pacote do sistema nem é pedido ao servidor.
  */
 function Gate({ onReady, onRejected }: { onReady: () => void; onRejected: (reason: string) => void }) {
-  const [init, setInit] = useState<InitData | null>(null);
+  const [me, setMe] = useState<Me | null>(null);
   const [denied, setDenied] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -67,10 +67,10 @@ function Gate({ onReady, onRejected }: { onReady: () => void; onRejected: (reaso
     let alive = true;
     setFailed(null);
     api
-      .init()
+      .me()
       .then((d) => {
         if (!alive) return;
-        setInit(d);
+        setMe(d);
         onReady();
       })
       .catch((e) => {
@@ -120,10 +120,10 @@ function Gate({ onReady, onRejected }: { onReady: () => void; onRejected: (reaso
         {failed}
       </AccessNotice>
     );
-  if (!init) return <Loading />;
+  if (!me) return <Loading />;
   return (
     <Suspense fallback={<Loading />}>
-      <Shell init={init} onSignOut={leave} />
+      <Shell me={me} onSignOut={leave} />
     </Suspense>
   );
 }

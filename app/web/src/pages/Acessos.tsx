@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { Check, ChevronDown, Copy, KeyRound, Loader2, Pencil, Trash2, UserPlus, Users, X } from "lucide-react";
-import { api, type AccessList, type AccessUser, type Role } from "@/lib/api";
+import { api, type AccessChange, type AccessUser, type Me, type Role } from "@/lib/api";
 import { teamLabel } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -28,6 +28,18 @@ interface Draft {
   /** true = alterando um acesso que já existe (o e-mail não muda) */
   editing: boolean;
 }
+
+/** Senha recém-criada para um e-mail. */
+interface NewPassword {
+  email: string;
+  value: string;
+}
+
+/** Admins primeiro, depois por e-mail: a mesma ordem em que a API lista. */
+const sorted = (users: AccessUser[]) =>
+  [...users].sort(
+    (a, b) => Number(b.role === "admin") - Number(a.role === "admin") || (a.email < b.email ? -1 : a.email > b.email ? 1 : 0),
+  );
 
 const EMPTY: Draft = { email: "", name: "", role: "coordinator", teams: [], editing: false };
 
@@ -69,26 +81,23 @@ function TeamPicker({ all, value, onChange }: { all: string[]; value: string[]; 
 }
 
 /** Tela do administrador: quem pode entrar no sistema, com qual papel e em quais equipes. */
-export function AcessosPage() {
-  const [list, setList] = useState<AccessList | null>(null);
+export function AcessosPage({ me }: { me: Me }) {
+  const [list, setList] = useState<AccessUser[] | null>(null);
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [busy, setBusy] = useState(false);
   const [removing, setRemoving] = useState<AccessUser | null>(null);
   const [resetting, setResetting] = useState<AccessUser | null>(null);
   /** senha recém-criada, mostrada uma única vez */
-  const [shown, setShown] = useState<AccessList["password"]>(null);
+  const [shown, setShown] = useState<NewPassword | null>(null);
 
   useEffect(() => {
     api.users().then(setList).catch((e) => toast.error(e.message));
   }, []);
 
-  async function run(action: () => Promise<AccessList>, done: string): Promise<boolean> {
+  async function run(action: () => Promise<void>): Promise<boolean> {
     setBusy(true);
     try {
-      const next = await action();
-      setList(next);
-      if (next.password) setShown(next.password);
-      else toast.success(done);
+      await action();
       return true;
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
@@ -97,6 +106,13 @@ export function AcessosPage() {
       setBusy(false);
     }
   }
+
+  /** Aplica na lista da tela o acesso que a API devolveu, sem pedir a lista inteira de novo. */
+  const apply = (change: AccessChange, done: string) => {
+    setList((l) => sorted([...(l ?? []).filter((u) => u.email !== change.user.email), change.user]));
+    if (change.password) setShown({ email: change.user.email, value: change.password });
+    else toast.success(done);
+  };
 
   const needsTeam = draft.role === "coordinator" && draft.teams.length === 0;
 
@@ -108,11 +124,11 @@ export function AcessosPage() {
     }
     const address = draft.email.trim().toLowerCase();
     const done = draft.editing ? `Acesso de ${address} atualizado.` : `${address} liberado.`;
-    const user = { email: address, role: draft.role, teams: draft.teams, name: draft.name.trim() || undefined };
-    if (await run(() => api.saveUser(user), done)) setDraft(EMPTY);
+    const access = { role: draft.role, teams: draft.teams, name: draft.name.trim() || undefined };
+    if (await run(async () => apply(await api.saveUser(address, access), done))) setDraft(EMPTY);
   };
 
-  const admins = list?.users.filter((u) => u.role === "admin").length ?? 0;
+  const admins = list?.filter((u) => u.role === "admin").length ?? 0;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -120,7 +136,7 @@ export function AcessosPage() {
         <div className="mr-auto">
           <h1 className="text-[15px] leading-tight font-semibold">Acessos</h1>
           <p className="text-xs text-muted-foreground">
-            {list ? `${list.users.length} e-mail(s) liberado(s) · ${admins} administrador(es)` : "Carregando…"}
+            {list ? `${list.length} e-mail(s) liberado(s) · ${admins} administrador(es)` : "Carregando…"}
           </p>
         </div>
       </header>
@@ -156,7 +172,7 @@ export function AcessosPage() {
           </SelectContent>
         </Select>
         {draft.role === "coordinator" && (
-          <TeamPicker all={list?.teams ?? []} value={draft.teams} onChange={(teams) => setDraft({ ...draft, teams })} />
+          <TeamPicker all={me.teams} value={draft.teams} onChange={(teams) => setDraft({ ...draft, teams })} />
         )}
         <Button type="submit" disabled={busy}>
           {busy ? <Loader2 className="animate-spin" /> : draft.editing ? <Pencil /> : <UserPlus />}
@@ -190,8 +206,8 @@ export function AcessosPage() {
               </tr>
             </thead>
             <tbody>
-              {list?.users.map((u) => {
-                const self = u.email === list.me;
+              {list?.map((u) => {
+                const self = u.email === me.email;
                 const lastAdmin = u.role === "admin" && admins <= 1;
                 const locked = self || lastAdmin;
                 const why = self
@@ -297,7 +313,11 @@ export function AcessosPage() {
           const target = removing!;
           setRemoving(null);
           if (draft.editing && draft.email === target.email) setDraft(EMPTY);
-          run(() => api.removeUser(target.email), `Acesso de ${target.email} removido.`);
+          run(async () => {
+            await api.removeUser(target.email);
+            setList((l) => l?.filter((u) => u.email !== target.email) ?? null);
+            toast.success(`Acesso de ${target.email} removido.`);
+          });
         }}
       />
 
@@ -315,7 +335,7 @@ export function AcessosPage() {
         onConfirm={() => {
           const target = resetting!;
           setResetting(null);
-          run(() => api.newPassword(target.email), `Nova senha gerada para ${target.email}.`);
+          run(async () => apply(await api.newPassword(target.email), `Nova senha gerada para ${target.email}.`));
         }}
       />
 
@@ -325,7 +345,7 @@ export function AcessosPage() {
 }
 
 /** Mostra a senha recém-criada. Ela não fica guardada: fechou, não aparece de novo. */
-function PasswordDialog({ password, onClose }: { password: AccessList["password"]; onClose: () => void }) {
+function PasswordDialog({ password, onClose }: { password: NewPassword | null; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
   useEffect(() => setCopied(false), [password]);
 

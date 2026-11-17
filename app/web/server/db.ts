@@ -1,6 +1,12 @@
-/** Acesso ao Postgres (Neon). Mesmas consultas do banco SQLite antigo (app/escala/db.py). */
+/**
+ * Acesso ao Postgres (Neon).
+ *
+ * Cada função faz o filtro e a soma no próprio banco e devolve só o que a rota vai usar:
+ * nada de trazer a tabela inteira para filtrar aqui. Consultas independentes saem juntas
+ * (Promise.all), porque cada uma é uma ida ao banco pela rede.
+ */
 import { neon } from "@neondatabase/serverless";
-import { DEFAULT_POSITIONS, TEAM_OPTIONS } from "./config.ts";
+import { POSITIONS, TEAM_OPTIONS } from "./config.ts";
 import type { Assignment, HistoryStats, Position, Volunteer } from "./models.ts";
 
 type Row = Record<string, any>;
@@ -76,12 +82,28 @@ export function cleanTeam(value: unknown): string {
   return TEAM_OPTIONS.find((option) => normalizeTeam(option) === n) ?? raw;
 }
 
+// ---------------------------------------------------------------- filtro por equipe
+
+/** Equipes de uma consulta: null = todas (admin sem filtro). */
+export type Teams = string[] | null;
+
+/**
+ * Equipe comparada no banco sem diferença de maiúsculas e tratando espaço, hífen e
+ * sublinhado como iguais ("Domingo Manha A" = "Domingo_Manha_A").
+ */
+const teamKeySql = (column: string) => `translate(lower(btrim(${column})), '- ', '__')`;
+const teamKeys = (teams: Teams) => (teams ?? []).map((t) => t.trim().toLowerCase().replace(/[- ]/g, "_"));
+
+/** Condição "voluntário v dentro do pedido"; os parâmetros $1..$3 vêm de volunteerScope(). */
+const VOLUNTEER_SCOPE = `(v.active OR NOT $1::boolean) AND ($2::boolean OR ${teamKeySql("v.team")} = ANY($3::text[]))`;
+const volunteerScope = (activeOnly: boolean, teams: Teams) => [activeOnly, teams === null, teamKeys(teams)];
+
 // ---------------------------------------------------------------- meta
 
-export async function getMeta<T>(sql: Sql, key: string, fallback: T): Promise<T> {
-  const rows = await sql`SELECT value FROM app_meta WHERE key = ${key}`;
-  const value = rows[0]?.value;
-  return value === null || value === undefined ? fallback : (value as T);
+/** Valores guardados em app_meta para essas chaves (só as que existem). */
+export async function getMetaMany(sql: Sql, keys: string[]): Promise<Map<string, unknown>> {
+  const rows = await sql`SELECT key, value FROM app_meta WHERE key = ANY(${keys}::text[])`;
+  return new Map(rows.filter((r) => r.value !== null && r.value !== undefined).map((r) => [r.key as string, r.value]));
 }
 
 export async function setMeta(sql: Sql, key: string, value: unknown): Promise<void> {
@@ -90,9 +112,7 @@ export async function setMeta(sql: Sql, key: string, value: unknown): Promise<vo
     ON CONFLICT (key) DO UPDATE SET value = excluded.value`;
 }
 
-// ---------------------------------------------------------------- posições (fixas)
-
-const POSITIONS = [...DEFAULT_POSITIONS].sort((a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
+// ---------------------------------------------------------------- posições (fixas, vêm do código)
 
 export function getPositions(): Position[] {
   return POSITIONS;
@@ -116,15 +136,48 @@ function volunteerFromRow(r: Row): Volunteer {
   };
 }
 
-export async function getVolunteers(sql: Sql, opts: { activeOnly?: boolean; team?: string | null } = {}): Promise<Volunteer[]> {
-  const activeOnly = opts.activeOnly ?? true;
-  const rows = await sql`SELECT * FROM volunteers WHERE (NOT ${activeOnly}::boolean OR active)`;
-  let vols = rows.map(volunteerFromRow).sort((a, b) => byName(a.name, b.name));
-  if (opts.team) {
-    const t = normalizeTeam(opts.team);
-    vols = vols.filter((v) => normalizeTeam(v.team) === t);
-  }
-  return vols;
+const sortByName = <T extends { name: string }>(list: T[]) => list.sort((a, b) => byName(a.name, b.name));
+
+export async function getVolunteers(sql: Sql, opts: { activeOnly?: boolean; teams?: Teams } = {}): Promise<Volunteer[]> {
+  const rows = await sql.query(
+    `SELECT v.* FROM volunteers v WHERE ${VOLUNTEER_SCOPE}`,
+    volunteerScope(opts.activeOnly ?? true, opts.teams ?? null),
+  );
+  return sortByName(rows.map(volunteerFromRow));
+}
+
+const FALTAS = "(SELECT COUNT(*)::int FROM presence p WHERE p.volunteer_id = v.id AND p.absent) AS faltas";
+
+/** Voluntário com o total de faltas, que a tela da escala mostra ao lado do nome. */
+export interface RosterVolunteer extends Volunteer {
+  faltas: number;
+}
+
+/** Equipe de um culto: todos (ativos e inativos) da equipe, com as faltas de cada um. */
+export async function getRoster(sql: Sql, team: string): Promise<RosterVolunteer[]> {
+  const rows = await sql.query(`SELECT v.*, ${FALTAS} FROM volunteers v WHERE ${VOLUNTEER_SCOPE}`, volunteerScope(false, [team]));
+  return sortByName(rows.map((r) => ({ ...volunteerFromRow(r), faltas: r.faltas })));
+}
+
+/** Voluntário com os números que o cadastro mostra. */
+export interface VolunteerStats extends RosterVolunteer {
+  vezes: number;
+  ultima_vez: string | null;
+}
+
+/** Voluntários (ativos e inativos) com faltas, vezes que serviu e a última vez, em uma consulta. */
+export async function getVolunteersWithStats(sql: Sql, teams: Teams = null): Promise<VolunteerStats[]> {
+  const rows = await sql.query(
+    `SELECT v.*, ${FALTAS},
+       (SELECT COUNT(DISTINCT si.schedule_id)::int FROM schedule_items si WHERE si.volunteer_id = v.id) AS vezes,
+       (SELECT MAX(s.service_date) FROM schedule_items si JOIN schedules s ON s.id = si.schedule_id
+         WHERE si.volunteer_id = v.id) AS ultima_vez
+     FROM volunteers v WHERE ${VOLUNTEER_SCOPE}`,
+    volunteerScope(false, teams),
+  );
+  return sortByName(
+    rows.map((r) => ({ ...volunteerFromRow(r), faltas: r.faltas, vezes: r.vezes, ultima_vez: r.ultima_vez ?? null })),
+  );
 }
 
 export async function getAvailableTeams(sql: Sql): Promise<string[]> {
@@ -132,8 +185,13 @@ export async function getAvailableTeams(sql: Sql): Promise<string[]> {
   return [...new Set([...rows.map((r) => r.team as string), ...TEAM_OPTIONS])].sort();
 }
 
+/** Equipe atual de um voluntário (null se o id não existe). */
+export async function getVolunteerTeam(sql: Sql, id: number): Promise<string | null> {
+  const rows = await sql`SELECT team FROM volunteers WHERE id = ${id}`;
+  return rows.length ? (rows[0].team as string) : null;
+}
+
 export interface VolunteerInput {
-  id?: number | null;
   name?: unknown;
   gender?: unknown;
   team?: unknown;
@@ -146,46 +204,60 @@ export interface VolunteerInput {
   observation?: unknown;
 }
 
-export async function upsertVolunteer(sql: Sql, input: VolunteerInput): Promise<number> {
+const given = (value: unknown) => value !== undefined && value !== null;
+
+/** Nome repetido (índice único) vira uma mensagem clara. */
+function duplicateName(e: unknown, name: string | null): never {
+  if ((e as { code?: string }).code === "23505") throw new UserError(`Já existe um voluntário chamado ${name}.`);
+  throw e;
+}
+
+export async function createVolunteer(sql: Sql, input: VolunteerInput): Promise<Volunteer> {
   const name = cleanName(input.name);
   if (!name) throw new UserError("Informe o nome do voluntário.");
-  const gender = cleanGender(input.gender) ?? "Masculino";
-  const flag = (value: unknown, fallback: boolean) => (value === undefined || value === null ? fallback : Boolean(value));
-  const v = {
-    team: cleanTeam(input.team),
-    active: flag(input.active, true),
-    can_bercario: Boolean(input.can_bercario),
-    can_cozinha: flag(input.can_cozinha, true),
-    can_recepcao: flag(input.can_recepcao, true),
-    can_banheiro: flag(input.can_banheiro, true),
-    can_limpar_altar: flag(input.can_limpar_altar, true),
-    observation: cleanText(input.observation),
-  };
+  const flag = (value: unknown, fallback: boolean) => (given(value) ? Boolean(value) : fallback);
   try {
-    if (input.id) {
-      const id = Number(input.id);
-      const rows = await sql`
-        UPDATE volunteers SET name = ${name}, gender = ${gender}, team = ${v.team}, active = ${v.active},
-          can_bercario = ${v.can_bercario}, can_cozinha = ${v.can_cozinha}, can_recepcao = ${v.can_recepcao},
-          can_banheiro = ${v.can_banheiro}, can_limpar_altar = ${v.can_limpar_altar}, observation = ${v.observation}
-        WHERE id = ${id} RETURNING id`;
-      if (!rows.length) throw new UserError("Voluntário não encontrado.");
-      return id;
-    }
     const rows = await sql`
       INSERT INTO volunteers (name, gender, team, active, can_bercario, can_cozinha, can_recepcao,
                               can_banheiro, can_limpar_altar, observation)
-      VALUES (${name}, ${gender}, ${v.team}, ${v.active}, ${v.can_bercario}, ${v.can_cozinha}, ${v.can_recepcao},
-              ${v.can_banheiro}, ${v.can_limpar_altar}, ${v.observation})
-      RETURNING id`;
-    return rows[0].id;
+      VALUES (${name}, ${cleanGender(input.gender) ?? "Masculino"}, ${cleanTeam(input.team)}, ${flag(input.active, true)},
+              ${Boolean(input.can_bercario)}, ${flag(input.can_cozinha, true)}, ${flag(input.can_recepcao, true)},
+              ${flag(input.can_banheiro, true)}, ${flag(input.can_limpar_altar, true)}, ${cleanText(input.observation)})
+      RETURNING *`;
+    return volunteerFromRow(rows[0]);
   } catch (e) {
-    if ((e as { code?: string }).code === "23505") throw new UserError(`Já existe um voluntário chamado ${name}.`);
-    throw e;
+    duplicateName(e, name);
   }
 }
 
-// ---------------------------------------------------------------- histórico
+/** Altera só os campos enviados; os outros ficam como estão. Devolve null se o id não existe. */
+export async function updateVolunteer(sql: Sql, id: number, input: VolunteerInput): Promise<Volunteer | null> {
+  const name = given(input.name) ? cleanName(input.name) : null;
+  if (name === "") throw new UserError("Informe o nome do voluntário.");
+  const flag = (value: unknown) => (given(value) ? Boolean(value) : null);
+  const team = given(input.team) ? cleanTeam(input.team) : null;
+  const observation = given(input.observation) ? cleanText(input.observation) : null;
+  try {
+    const rows = await sql`
+      UPDATE volunteers SET
+        name = COALESCE(${name}::text, name),
+        gender = COALESCE(${cleanGender(input.gender)}::text, gender),
+        team = COALESCE(${team}::text, team),
+        active = COALESCE(${flag(input.active)}::boolean, active),
+        can_bercario = COALESCE(${flag(input.can_bercario)}::boolean, can_bercario),
+        can_cozinha = COALESCE(${flag(input.can_cozinha)}::boolean, can_cozinha),
+        can_recepcao = COALESCE(${flag(input.can_recepcao)}::boolean, can_recepcao),
+        can_banheiro = COALESCE(${flag(input.can_banheiro)}::boolean, can_banheiro),
+        can_limpar_altar = COALESCE(${flag(input.can_limpar_altar)}::boolean, can_limpar_altar),
+        observation = COALESCE(${observation}::text, observation)
+      WHERE id = ${id} RETURNING *`;
+    return rows.length ? volunteerFromRow(rows[0]) : null;
+  } catch (e) {
+    duplicateName(e, name);
+  }
+}
+
+// ---------------------------------------------------------------- rotatividade (usada ao gerar)
 
 export async function getHistoryStats(sql: Sql, volunteerIds: number[]): Promise<Map<number, HistoryStats>> {
   const stats = new Map<number, HistoryStats>(
@@ -315,17 +387,25 @@ export interface SavedSchedule {
   absent: Map<number, string>;
 }
 
-/** Escala mais recente salva para a data e a equipe (ou null). */
+/**
+ * Escala mais recente salva para a data e a equipe (ou null). As três consultas saem juntas:
+ * as de itens e de faltas localizam a escala por conta própria, sem esperar a primeira.
+ */
 export async function findSchedule(sql: Sql, serviceDate: string, team: string): Promise<SavedSchedule | null> {
-  const found = await sql`
-    SELECT id, created_at, active_codes FROM schedules
-    WHERE service_date = ${serviceDate} AND team = ${team} ORDER BY id DESC LIMIT 1`;
+  const [found, items, absent] = await Promise.all([
+    sql`SELECT id, created_at, active_codes FROM schedules
+        WHERE service_date = ${serviceDate} AND team = ${team} ORDER BY id DESC LIMIT 1`,
+    sql`SELECT position_code, position_name, category, volunteer_id, volunteer_name, item_order
+        FROM schedule_items
+        WHERE schedule_id = (SELECT id FROM schedules WHERE service_date = ${serviceDate} AND team = ${team}
+                             ORDER BY id DESC LIMIT 1)
+        ORDER BY item_order`,
+    sql`SELECT volunteer_id, justification FROM presence
+        WHERE absent AND schedule_id = (SELECT id FROM schedules WHERE service_date = ${serviceDate} AND team = ${team}
+                                        ORDER BY id DESC LIMIT 1)`,
+  ]);
   if (!found.length) return null;
   const s = found[0];
-  const [items, absent] = await Promise.all([
-    sql`SELECT * FROM schedule_items WHERE schedule_id = ${s.id} ORDER BY item_order`,
-    sql`SELECT volunteer_id, justification FROM presence WHERE schedule_id = ${s.id} AND absent`,
-  ]);
   return {
     id: s.id,
     created_at: s.created_at,
@@ -347,22 +427,26 @@ export interface ScheduleRow {
   service_date: string;
   service_type: string;
   team: string;
-  created_at: Date;
   itens: number;
   faltas: number;
 }
 
-export async function listSchedules(sql: Sql, limit = 30): Promise<ScheduleRow[]> {
-  const rows = await sql`
-    SELECT s.id, s.service_date, s.service_type, s.team, s.created_at,
-      (SELECT COUNT(*)::int FROM schedule_items i WHERE i.schedule_id = s.id) AS itens,
-      (SELECT COUNT(*)::int FROM presence p WHERE p.schedule_id = s.id AND p.absent) AS faltas
-    FROM schedules s ORDER BY s.service_date DESC, s.id DESC LIMIT ${limit}`;
+/** Escalas salvas, da mais recente para a mais antiga, já filtradas por equipe. */
+export async function listSchedules(sql: Sql, teams: Teams = null, limit = 200): Promise<ScheduleRow[]> {
+  const rows = await sql.query(
+    `SELECT s.id, s.service_date, s.service_type, s.team,
+       (SELECT COUNT(*)::int FROM schedule_items i WHERE i.schedule_id = s.id) AS itens,
+       (SELECT COUNT(*)::int FROM presence p WHERE p.schedule_id = s.id AND p.absent) AS faltas
+     FROM schedules s
+     WHERE $1::boolean OR ${teamKeySql("s.team")} = ANY($2::text[])
+     ORDER BY s.service_date DESC, s.id DESC LIMIT $3`,
+    [teams === null, teamKeys(teams), limit],
+  );
   return rows as unknown as ScheduleRow[];
 }
 
 /** Equipe da última escala salva nesse dia da semana (ou null). `teams` limita a busca a essas equipes. */
-export async function lastTeamFor(sql: Sql, serviceType: string, teams: string[] | null = null): Promise<string | null> {
+export async function lastTeamFor(sql: Sql, serviceType: string, teams: Teams = null): Promise<string | null> {
   const rows = await sql`
     SELECT team FROM schedules
     WHERE service_type = ${serviceType} AND team <> ''
@@ -371,21 +455,7 @@ export async function lastTeamFor(sql: Sql, serviceType: string, teams: string[]
   return rows[0]?.team ?? null;
 }
 
-/** Quantas vezes cada voluntário serviu e a data da última vez. */
-export async function serviceInfo(sql: Sql): Promise<Map<number, { vezes: number; ultima: string | null }>> {
-  const rows = await sql`
-    SELECT si.volunteer_id, COUNT(DISTINCT s.id)::int AS vezes, MAX(s.service_date) AS ultima
-    FROM schedule_items si JOIN schedules s ON s.id = si.schedule_id GROUP BY si.volunteer_id`;
-  return new Map(rows.map((r) => [r.volunteer_id as number, { vezes: r.vezes, ultima: r.ultima }]));
-}
-
-/** Total de faltas e data da última falta por voluntário. */
-export async function absenceInfo(sql: Sql): Promise<Map<number, { total: number; ultima: string | null }>> {
-  const rows = await sql`
-    SELECT p.volunteer_id, COUNT(*)::int AS total, MAX(s.service_date) AS ultima
-    FROM presence p JOIN schedules s ON s.id = p.schedule_id WHERE p.absent GROUP BY p.volunteer_id`;
-  return new Map(rows.map((r) => [r.volunteer_id as number, { total: r.total, ultima: r.ultima }]));
-}
+// ---------------------------------------------------------------- histórico
 
 export interface AbsenceItem {
   date: string;
@@ -393,29 +463,20 @@ export interface AbsenceItem {
   reason: string;
 }
 
-/** Cada falta registrada (mais recente primeiro): data, equipe e motivo. */
-export async function absenceDetails(sql: Sql): Promise<Map<number, AbsenceItem[]>> {
-  const rows = await sql`
-    SELECT p.volunteer_id, s.service_date, s.team, p.justification FROM presence p
-    JOIN schedules s ON s.id = p.schedule_id WHERE p.absent
-    ORDER BY s.service_date DESC, s.id DESC`;
-  const out = new Map<number, AbsenceItem[]>();
-  for (const r of rows) {
-    if (!out.has(r.volunteer_id)) out.set(r.volunteer_id, []);
-    out.get(r.volunteer_id)!.push({ date: r.service_date, team: r.team, reason: r.justification ?? "" });
-  }
-  return out;
+/** Linha do histórico: só os números diferentes de zero, por coluna. */
+export interface HistoryRow {
+  id: number;
+  name: string;
+  gender: string;
+  team: string;
+  faltas: number;
+  /** coluna (ex.: "Cozinha", "POS_07") -> quantas vezes serviu */
+  counts: Record<string, number>;
+  /** faltas mais recentes (até RECENT_ABSENCES), com data e motivo */
+  absences: AbsenceItem[];
 }
 
-// ---------------------------------------------------------------- matriz do histórico
-
-export const HISTORY_HEADERS = [
-  "Voluntarios", "Genero", "Equipe", "Total_Faltas", "Ultima_Falta",
-  "Cozinha", "Confete", "Banheiro (Entrada)", "Banheiro (Saída)",
-  "Limpeza Altar", "Limpeza Confete", "Recepção",
-  "POS_BM", "POS_GM", "POS_GF", "POS_BK", "POS_BF",
-  ...Array.from({ length: 22 }, (_, i) => `POS_${String(i + 1).padStart(2, "0")}`),
-];
+export const RECENT_ABSENCES = 8;
 
 const CATEGORY_COLUMN: Record<string, string> = {
   Cozinha: "Cozinha",
@@ -427,7 +488,7 @@ const CATEGORY_COLUMN: Record<string, string> = {
   Recepcao: "Recepção",
 };
 
-function matrixColumn(category: string, rawCode: string): string | null {
+function historyColumn(category: string, rawCode: string | null): string | null {
   const code = (rawCode ?? "").trim().toUpperCase();
   if (["Corredor", "Galeria", "Banheiro", "Bercario"].includes(category)) {
     if (["BM", "GM", "GF", "BK", "BF"].includes(code)) return `POS_${code}`;
@@ -437,35 +498,54 @@ function matrixColumn(category: string, rawCode: string): string | null {
   return CATEGORY_COLUMN[category] ?? null;
 }
 
-export type HistoryRow = Record<string, string | number | boolean>;
-
-export async function getHistoryMatrix(sql: Sql, team: string | null = null): Promise<HistoryRow[]> {
-  const [vols, seeds, positionSeeds, items, absences] = await Promise.all([
-    getVolunteers(sql, { activeOnly: false, team }),
-    sql`SELECT volunteer_id, category, count FROM history_seed`,
-    sql`SELECT volunteer_id, position_code, count FROM history_position_seed`,
-    sql`SELECT volunteer_id, category, position_code, COUNT(*)::int AS n FROM schedule_items
-        GROUP BY volunteer_id, category, position_code`,
-    absenceInfo(sql),
+/**
+ * Histórico dos voluntários ativos: quantas vezes cada um serviu em cada função e as
+ * faltas. O banco soma a carga inicial da planilha com as escalas salvas.
+ */
+export async function getHistory(sql: Sql, teams: Teams = null): Promise<HistoryRow[]> {
+  const scope = volunteerScope(true, teams);
+  const [vols, counts, absences] = await Promise.all([
+    sql.query(`SELECT v.id, v.name, v.gender, v.team FROM volunteers v WHERE ${VOLUNTEER_SCOPE}`, scope),
+    sql.query(
+      `SELECT t.volunteer_id, t.category, t.position_code, SUM(t.n)::int AS n FROM (
+         SELECT volunteer_id, category, NULL::text AS position_code, count AS n FROM history_seed
+         UNION ALL
+         SELECT volunteer_id, 'Corredor', position_code, count FROM history_position_seed
+         UNION ALL
+         SELECT volunteer_id, category, position_code, 1 FROM schedule_items
+       ) t JOIN volunteers v ON v.id = t.volunteer_id
+       WHERE ${VOLUNTEER_SCOPE}
+       GROUP BY t.volunteer_id, t.category, t.position_code`,
+      scope,
+    ),
+    sql.query(
+      `SELECT volunteer_id, service_date, team, justification, total FROM (
+         SELECT p.volunteer_id, s.service_date, s.team, p.justification,
+                (COUNT(*) OVER (PARTITION BY p.volunteer_id))::int AS total,
+                row_number() OVER (PARTITION BY p.volunteer_id ORDER BY s.service_date DESC, s.id DESC) AS rn
+         FROM presence p
+         JOIN schedules s ON s.id = p.schedule_id
+         JOIN volunteers v ON v.id = p.volunteer_id
+         WHERE p.absent AND ${VOLUNTEER_SCOPE}
+       ) t WHERE rn <= ${RECENT_ABSENCES} ORDER BY volunteer_id, rn`,
+      scope,
+    ),
   ]);
-  const rows = new Map<number, HistoryRow>();
-  for (const v of vols) {
-    const row: HistoryRow = Object.fromEntries(HISTORY_HEADERS.map((h) => [h, 0]));
-    Object.assign(row, { id: v.id, Voluntarios: v.name, Genero: v.gender, Equipe: v.team, Ultima_Falta: "", Ativo: v.active });
-    rows.set(v.id, row);
+  const rows = new Map<number, HistoryRow>(
+    vols.map((v) => [v.id, { id: v.id, name: v.name, gender: v.gender, team: v.team, faltas: 0, counts: {}, absences: [] }]),
+  );
+  for (const r of counts) {
+    const row = rows.get(r.volunteer_id);
+    const column = historyColumn(r.category, r.position_code);
+    if (row && column) row.counts[column] = (row.counts[column] ?? 0) + r.n;
   }
-  const add = (id: number, col: string | null | undefined, n: number) => {
-    const row = rows.get(id);
-    if (row && col) row[col] = (row[col] as number) + n;
-  };
-  for (const r of seeds) add(r.volunteer_id, CATEGORY_COLUMN[r.category], r.count);
-  for (const r of positionSeeds) add(r.volunteer_id, matrixColumn("Corredor", r.position_code), r.count);
-  for (const r of items) add(r.volunteer_id, matrixColumn(r.category, r.position_code), r.n);
-  for (const [id, info] of absences) {
-    const row = rows.get(id);
-    if (row) Object.assign(row, { Total_Faltas: info.total, Ultima_Falta: info.ultima ?? "" });
+  for (const r of absences) {
+    const row = rows.get(r.volunteer_id);
+    if (!row) continue;
+    row.faltas = r.total;
+    row.absences.push({ date: r.service_date, team: r.team, reason: r.justification ?? "" });
   }
-  return [...rows.values()]; // já na ordem de getVolunteers (por nome)
+  return sortByName([...rows.values()]);
 }
 
 // ---------------------------------------------------------------- acessos (app_users)
@@ -519,13 +599,14 @@ export async function getAccess(sql: Sql, email: string): Promise<Access | null>
   return rows.length ? { role: rows[0].role as Role, teams: (rows[0].teams as string[]) ?? [] } : null;
 }
 
-/** Lista de acessos, com a situação da conta de cada e-mail no login. */
-export async function listAppUsers(sql: Sql): Promise<AppUser[]> {
+/** Acessos com a situação da conta de cada e-mail no login. `email`: só o acesso desse e-mail. */
+export async function listAppUsers(sql: Sql, email: string | null = null): Promise<AppUser[]> {
   const rows = await sql`
     SELECT a.email, a.role, a.teams, a.created_at, a.created_by, u.name,
            (u.email IS NOT NULL) AS has_account, COALESCE(u."emailVerified", false) AS verified
     FROM app_users a
     LEFT JOIN neon_auth."user" u ON lower(u.email) = a.email
+    WHERE ${email}::text IS NULL OR a.email = ${email}
     ORDER BY (a.role = 'admin') DESC, a.email`;
   return rows as unknown as AppUser[];
 }
@@ -551,10 +632,4 @@ export async function removeAppUser(sql: Sql, email: string): Promise<void> {
 
 export async function countAdmins(sql: Sql): Promise<number> {
   return (await sql`SELECT COUNT(*)::int AS n FROM app_users WHERE role = 'admin'`)[0].n;
-}
-
-/** Equipe atual de um voluntário (null se o id não existe). */
-export async function getVolunteerTeam(sql: Sql, id: number): Promise<string | null> {
-  const rows = await sql`SELECT team FROM volunteers WHERE id = ${id}`;
-  return rows.length ? (rows[0].team as string) : null;
 }

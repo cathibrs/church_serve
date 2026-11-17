@@ -12,5 +12,5 @@
     "erasableSyntaxOnly": true,
     "types": ["node"]
   },
-  "include": ["server", "netlify", "scripts"]
+  "include": ["shared", "server", "netlify", "scripts"]
 }

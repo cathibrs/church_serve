@@ -1,4 +1,6 @@
-export type Gender = "Masculino" | "Feminino";
+import type { Gender, Position } from "../shared/catalog.ts";
+
+export type { Gender, Position };
 
 export interface Volunteer {
   id: number;
@@ -12,16 +14,6 @@ export interface Volunteer {
   can_banheiro: boolean;
   can_limpar_altar: boolean;
   observation: string;
-}
-
-export interface Position {
-  code: string;
-  name: string;
-  category: string;
-  allowed_gender: "Qualquer" | Gender;
-  quantity: number;
-  normal_active: boolean;
-  event_only: boolean;
 }
 
 export interface Assignment {

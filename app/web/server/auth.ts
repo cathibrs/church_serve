@@ -29,7 +29,8 @@ export class HttpError extends Error {
  *   unverified       conta com e-mail ainda não confirmado
  *   forbidden        e-mail sem acesso liberado (ou ação só de admin)
  * Não se usa 403: no `netlify dev`, uma resposta 403 ou 404 faz o emulador repetir o pedido
- * em caminhos alternativos (/api/x.html) e a mensagem original se perde.
+ * em caminhos alternativos (/api/x.html) e a mensagem original se perde. O 404 fica só para
+ * o que não existe (rota, voluntário, e-mail), onde nada foi gravado e repetir não faz mal.
  */
 export const denied = (code: "unauthenticated" | "unverified" | "forbidden", message: string) =>
   new HttpError(401, message, code);

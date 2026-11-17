@@ -10,6 +10,7 @@ app/web/
   src/                     telas (React + Tailwind)
   netlify/functions/api.ts entrada da API
   server/                  regras da escala, banco, login e rotas
+  shared/catalog.ts        posições, equipes e regras fixas (usado pelo site e pela API)
   db/schema.sql            tabelas do Postgres
   scripts/import.ts        carga inicial (SQLite antigo + planilha)
 ```
@@ -74,6 +75,8 @@ O comando mostra quantas linhas leu e quantas gravou em cada tabela. O que ele f
 3. Libere o endereço do site no login do Neon; sem isso o login responde `invalid domain`:
    `neon neon-auth domain add https://seu-site.netlify.app`
 4. Publique de novo depois de mudar variáveis: elas só valem a partir da publicação seguinte.
+   O navegador guarda o endereço do login por até uma hora; se você trocar `NEON_AUTH_BASE_URL`,
+   quem abriu o site há pouco pode levar esse tempo para receber o novo.
 
 ### 4. Primeiro acesso e administradores
 
@@ -132,13 +135,53 @@ npm run build
   Python. Os casos ficam em `server/fixtures/parity.json` e são refeitos com
   `py -3 scripts/gen_parity.py` (precisa da pasta `app/escala`).
 
+## API
+
+A API é REST: cada endereço é um recurso e o verbo diz o que fazer com ele. Tudo exige o token do
+login (`Authorization: Bearer ...`), menos `/api/config`. As respostas são JSON; erros vêm como
+`{ "error": "mensagem", "code": "..." }` com o status correspondente (400 entrada inválida, 401 sem
+acesso, 404 não existe).
+
+| Verbo e endereço | O que faz |
+| --- | --- |
+| `GET /api/config` | Endereço do login (público). |
+| `GET /api/me` | Quem está logado, o papel, as equipes e a data de hoje. |
+| `GET /api/volunteers[?team=]` | Voluntários, com faltas, vezes que serviram e a última vez. |
+| `POST /api/volunteers` | Cadastra um voluntário (201). |
+| `PATCH /api/volunteers/:id` | Altera só os campos enviados. |
+| `GET /api/schedules[?team=]` | Escalas salvas (data, equipe, posições e faltas). |
+| `GET /api/schedules/:data[/:equipe]` | Folha do culto: equipe, posições padrão, escala salva e regras quebradas. Sem equipe, usa a sugerida para o dia. |
+| `PUT /api/schedules/:data/:equipe` | Grava a escala do culto (substitui a anterior) e devolve as regras quebradas. |
+| `POST /api/schedules/:data/:equipe/suggestion` | Gera uma sugestão de escala. Não grava. |
+| `PUT /api/teams/:equipe/positions` | Guarda as posições ligadas por padrão para a equipe. |
+| `GET /api/history[?team=]` | Quantas vezes cada voluntário ativo serviu em cada função, e as faltas. |
+| `GET /api/users` | Acessos liberados (só administrador). |
+| `PUT /api/users/:email` | Libera um e-mail (201, com a senha criada) ou muda papel e equipes (200). |
+| `DELETE /api/users/:email` | Remove o acesso (204). |
+| `POST /api/users/:email/password` | Gera uma senha nova (201). |
+
+Como o sistema fica leve:
+
+- **Cada tela pede só o que mostra.** Abrir um culto é um pedido; salvar é um pedido (a resposta
+  já traz as regras quebradas, sem um segundo pedido para conferir). Depois de alterar um
+  voluntário ou um acesso, a tela usa o item que a API devolveu, sem baixar a lista de novo.
+- **O que é fixo não trafega.** Posições, equipes e regras estão em `shared/catalog.ts` e vão
+  dentro do próprio site.
+- **O banco filtra e soma.** As consultas já saem por equipe e com os totais prontos; o histórico
+  manda só as colunas em que a pessoa serviu, e só de quem está ativo.
+- **Os dados nunca ficam em cache no navegador** (`Cache-Control: no-store`); só o endereço do
+  login fica, por uma hora.
+
+`server/client.test.ts` roda o cliente do site (`src/lib/api.ts`) contra as rotas de verdade: se um
+endereço ou verbo mudar de um lado só, o teste falha.
+
 ## O que mudou em relação ao programa de Windows
 
 - Não existe mais `EscalaIgreja.exe`, nem banco em arquivo, nem pasta `exports`.
 - O sistema não gera mais a planilha `.xlsx` de cada culto. Continuam: mapa em PNG, ficha em PNG e impressão.
 - A marcação "Falta = Sim" feita na planilha deixou de existir; as faltas são marcadas na tela de presença.
 - Os horários ("Salvo às...") usam o fuso de São Paulo.
-- As posições do mapa e da ficha ficam em `server/config.ts`, não no banco.
+- As posições do mapa e da ficha ficam em `shared/catalog.ts`, não no banco.
 
 O código Python (`app/escala`), a interface antiga já compilada (`app/static`), os executáveis,
 `data/` e `exports/` continuam na pasta como cópia de segurança e não fazem parte do site.
