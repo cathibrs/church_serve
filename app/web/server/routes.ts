@@ -52,17 +52,59 @@ function localStamp(at: Date | string): string {
   return `${date} ${time}`;
 }
 
-/** Equipe da última escala salva no mesmo dia da semana; senão, a padrão. */
-async function suggestTeam(sql: Sql, date: string): Promise<string> {
-  return (await db.lastTeamFor(sql, weekdayName(date))) ?? teamForDate(date);
+// ---------------------------------------------------------------- equipes de quem está logado
+
+/** Equipes que a pessoa pode usar: null = todas (admin); coordenador = só as dele. */
+const ownTeams = (user: AuthUser): string[] | null => (user.role === "admin" ? null : user.teams);
+
+function canUseTeam(user: AuthUser, team: string): boolean {
+  const mine = ownTeams(user);
+  return mine === null || mine.some((t) => db.normalizeTeam(t) === db.normalizeTeam(team));
 }
 
-async function defaultActive(sql: Sql): Promise<string[]> {
+/** Recusa a equipe que não é da pessoa. A API é quem garante isso, não a tela. */
+function checkTeam(user: AuthUser, team: string): string {
+  if (!canUseTeam(user, team)) throw denied("forbidden", `Você não coordena a equipe ${team.replaceAll("_", " ")}.`);
+  return team;
+}
+
+/**
+ * Equipe informada em um pedido. Coordenador precisa informar uma equipe dele;
+ * admin pode omitir (vale para todas).
+ */
+function teamOf(user: AuthUser, value: unknown): string | null {
+  if (value) return checkTeam(user, String(value));
+  if (ownTeams(user) !== null) throw new UserError("Informe a equipe.");
+  return null;
+}
+
+async function availableTeams(sql: Sql, user: AuthUser): Promise<string[]> {
+  return ownTeams(user) ?? db.getAvailableTeams(sql);
+}
+
+/** Equipe da última escala salva no mesmo dia da semana; senão, a padrão. Sempre uma equipe da pessoa. */
+async function suggestTeam(sql: Sql, date: string, user: AuthUser): Promise<string> {
+  const mine = ownTeams(user);
+  const weekday = weekdayName(date);
+  const last = await db.lastTeamFor(sql, weekday, mine);
+  if (last) return last;
+  const fallback = teamForDate(date);
+  if (mine === null || canUseTeam(user, fallback)) return fallback;
+  return mine.find((t) => t.startsWith(weekday)) ?? mine[0];
+}
+
+const DEFAULT_POSITIONS_KEY = "posicoes_padrao";
+
+/** Posições ativas padrão: as da equipe, se ela guardou as suas; senão as gerais; senão as de fábrica. */
+async function defaultActive(sql: Sql, team: string | null = null): Promise<string[]> {
   const positions = db.getPositions();
-  const saved = await db.getMeta<string[] | null>(sql, "posicoes_padrao", null);
-  if (saved?.length) {
-    const codes = new Set(positions.map((p) => p.code));
-    return saved.filter((c) => codes.has(c));
+  const keys = team ? [`${DEFAULT_POSITIONS_KEY}:${team}`, DEFAULT_POSITIONS_KEY] : [DEFAULT_POSITIONS_KEY];
+  for (const key of keys) {
+    const saved = await db.getMeta<string[] | null>(sql, key, null);
+    if (saved?.length) {
+      const codes = new Set(positions.map((p) => p.code));
+      return saved.filter((c) => codes.has(c));
+    }
   }
   return positions.filter((p) => p.normal_active && !p.event_only).map((p) => p.code);
 }
@@ -142,30 +184,26 @@ async function generate(
 
 async function apiInit(sql: Sql, _q: Query, user: AuthUser) {
   const today = localNow().date;
-  const [teams, team, active] = await Promise.all([
-    db.getAvailableTeams(sql),
-    suggestTeam(sql, today),
-    defaultActive(sql),
-  ]);
+  const [teams, team] = await Promise.all([availableTeams(sql, user), suggestTeam(sql, today, user)]);
   return {
     today,
     teams,
     team,
     positions: db.getPositions(),
-    default_active: active,
-    user: { email: user.email, role: user.role },
+    default_active: await defaultActive(sql, team),
+    user: { email: user.email, role: user.role, teams: user.teams },
   };
 }
 
-async function apiDay(sql: Sql, q: Query) {
+async function apiDay(sql: Sql, q: Query, user: AuthUser) {
   const date = dateOf(q.date);
-  const suggested = await suggestTeam(sql, date);
-  const team = q.team || suggested;
+  const suggested = await suggestTeam(sql, date, user);
+  const team = q.team ? checkTeam(user, q.team) : suggested;
   const [vols, absences, schedule, active] = await Promise.all([
     db.getVolunteers(sql, { activeOnly: false, team }),
     db.absenceInfo(sql),
     db.findSchedule(sql, date, team),
-    defaultActive(sql),
+    defaultActive(sql, team),
   ]);
   const saved = schedule && {
     id: schedule.id,
@@ -187,9 +225,9 @@ async function apiDay(sql: Sql, q: Query) {
   };
 }
 
-async function apiGenerate(sql: Sql, body: Body) {
+async function apiGenerate(sql: Sql, body: Body, user: AuthUser) {
   const date = dateOf(body.date);
-  const team = body.team ? String(body.team) : null;
+  const team = teamOf(user, body.team);
   const present = idSet(body.present_ids);
   const codes = codeList(body.active_codes);
   const res = await generate(sql, present, codes && new Set(codes), team, date);
@@ -200,26 +238,33 @@ async function apiGenerate(sql: Sql, body: Body) {
   };
 }
 
-async function apiValidate(sql: Sql, body: Body) {
+async function apiValidate(sql: Sql, body: Body, user: AuthUser) {
   const date = dateOf(body.date);
-  const team = body.team ? String(body.team) : null;
+  const team = teamOf(user, body.team);
   return { issues: await validateFor(sql, assignmentsOf(body), team, date, idSet(body.present_ids)) };
 }
 
-async function apiSave(sql: Sql, body: Body) {
+async function apiSave(sql: Sql, body: Body, user: AuthUser) {
   const date = dateOf(body.date);
-  const team = body.team ? String(body.team) : await suggestTeam(sql, date);
+  const team = teamOf(user, body.team) ?? (await suggestTeam(sql, date, user));
   const present = idSet(body.present_ids);
   const reasons = new Map<number, string>();
   for (const [id, reason] of Object.entries(body.absent_reasons ?? {})) {
     if (reason) reasons.set(Number(id), String(reason));
   }
+  const assignments = assignmentsOf(body);
   const teamVols = await db.getVolunteers(sql, { team });
+  if (ownTeams(user) !== null) {
+    // coordenador só escala e marca presença de gente da equipe dele
+    const everyone = new Set((await db.getVolunteers(sql, { activeOnly: false, team })).map((v) => v.id));
+    const outsiders = [...present, ...assignments.map((a) => a.volunteer_id)].filter((id) => !everyone.has(id));
+    if (outsiders.length) throw new UserError("A escala tem pessoas que não são desta equipe.");
+  }
   const scheduleId = await db.saveSchedule(sql, {
     serviceDate: date,
     serviceType: weekdayName(date),
     team,
-    assignments: assignmentsOf(body),
+    assignments,
     presentIds: present,
     allVolunteerIds: teamVols.map((v) => v.id),
     activeCodes: codeList(body.active_codes),
@@ -228,17 +273,34 @@ async function apiSave(sql: Sql, body: Body) {
   return { schedule_id: scheduleId, warnings: [] as string[], saved_at: localNow().time };
 }
 
-async function apiVolunteer(sql: Sql, body: Body) {
-  return { id: await db.upsertVolunteer(sql, { ...body, id: body.id || null }) };
+async function apiVolunteer(sql: Sql, body: Body, user: AuthUser) {
+  const id = body.id ? Number(body.id) : null;
+  if (ownTeams(user) !== null) {
+    // coordenador só cadastra na equipe dele e só altera voluntário que já é dela
+    checkTeam(user, db.cleanTeam(body.team));
+    if (id) {
+      const current = await db.getVolunteerTeam(sql, id);
+      if (current === null) throw new UserError("Voluntário não encontrado.");
+      checkTeam(user, current);
+    }
+  }
+  return { id: await db.upsertVolunteer(sql, { ...body, id }) };
 }
 
-async function apiVolunteers(sql: Sql, q: Query) {
-  const [vols, absences, served, teams] = await Promise.all([
-    db.getVolunteers(sql, { activeOnly: false, team: q.team || null }),
+/** Limita uma lista às equipes da pessoa (admin: tudo). */
+function onlyMine<T>(user: AuthUser, items: T[], teamOfItem: (item: T) => string): T[] {
+  return ownTeams(user) === null ? items : items.filter((item) => canUseTeam(user, teamOfItem(item)));
+}
+
+async function apiVolunteers(sql: Sql, q: Query, user: AuthUser) {
+  const team = q.team ? checkTeam(user, q.team) : null;
+  const [all, absences, served, teams] = await Promise.all([
+    db.getVolunteers(sql, { activeOnly: false, team }),
     db.absenceInfo(sql),
     db.serviceInfo(sql),
-    db.getAvailableTeams(sql),
+    availableTeams(sql, user),
   ]);
+  const vols = onlyMine(user, all, (v) => v.team);
   return {
     volunteers: vols.map((v) => ({
       ...v,
@@ -250,23 +312,25 @@ async function apiVolunteers(sql: Sql, q: Query) {
   };
 }
 
-async function apiPositionsDefault(sql: Sql, body: Body) {
+/** Guarda as posições ativas padrão: da equipe informada ou, sem equipe (só admin), as gerais. */
+async function apiPositionsDefault(sql: Sql, body: Body, user: AuthUser) {
   const codes = [...new Set(codeList(body.codes) ?? [])].sort();
-  await db.setMeta(sql, "posicoes_padrao", codes);
+  const team = teamOf(user, body.team);
+  await db.setMeta(sql, team ? `${DEFAULT_POSITIONS_KEY}:${team}` : DEFAULT_POSITIONS_KEY, codes);
   return { default_active: codes };
 }
 
-async function apiHistory(sql: Sql, q: Query) {
-  const team = q.team || null;
-  const [all, rows, details] = await Promise.all([
+async function apiHistory(sql: Sql, q: Query, user: AuthUser) {
+  const team = q.team ? checkTeam(user, q.team) : null;
+  const [allSchedules, allRows, details] = await Promise.all([
     db.listSchedules(sql, 200),
     db.getHistoryMatrix(sql, team),
     db.absenceDetails(sql),
   ]);
-  const schedules = (team ? all.filter((s) => s.team === team) : all).map((s) => ({
-    ...s,
-    created_at: localStamp(s.created_at),
-  }));
+  const rows = onlyMine(user, allRows, (r) => String(r.Equipe));
+  const schedules = onlyMine(user, team ? allSchedules.filter((s) => s.team === team) : allSchedules, (s) => s.team).map(
+    (s) => ({ ...s, created_at: localStamp(s.created_at) }),
+  );
   const active = rows.filter((r) => r.Ativo);
   const totalAbsences = schedules.reduce((sum, s) => sum + s.faltas, 0);
   const ids = new Set(rows.map((r) => r.id as number));
@@ -292,8 +356,8 @@ function requireAdmin(user: AuthUser): void {
 }
 
 async function usersPayload(sql: Sql, user: AuthUser) {
-  const users = await db.listAppUsers(sql);
-  return { me: user.email, users: users.map((u) => ({ ...u, created_at: localStamp(u.created_at) })) };
+  const [users, teams] = await Promise.all([db.listAppUsers(sql), db.getAvailableTeams(sql)]);
+  return { me: user.email, teams, users: users.map((u) => ({ ...u, created_at: localStamp(u.created_at) })) };
 }
 
 async function apiUsers(sql: Sql, _q: Query, user: AuthUser) {
@@ -303,7 +367,7 @@ async function apiUsers(sql: Sql, _q: Query, user: AuthUser) {
 
 /** Recusa mudanças que deixariam o sistema sem admin ou tirariam o acesso de quem está pedindo. */
 async function guardAdminChange(sql: Sql, user: AuthUser, email: string, next: db.Role | null) {
-  const current = await db.getAppUserRole(sql, email);
+  const current = (await db.getAccess(sql, email))?.role;
   if (current !== "admin" || next === "admin") return;
   if (email === user.email) {
     throw new UserError("Você não pode tirar o seu próprio acesso de administrador. Peça a outro administrador.");
@@ -314,9 +378,12 @@ async function guardAdminChange(sql: Sql, user: AuthUser, email: string, next: d
 async function apiUserSave(sql: Sql, body: Body, user: AuthUser) {
   requireAdmin(user);
   const email = db.cleanEmail(body.email);
-  const role = db.cleanRole(body.role ?? "member");
+  const role = db.cleanRole(body.role ?? "coordinator");
+  // coordenador sempre tem pelo menos uma equipe; admin não tem equipe (vê todas)
+  const teams = role === "admin" ? [] : db.cleanTeams(body.teams, await db.getAvailableTeams(sql));
+  if (role === "coordinator" && !teams.length) throw new UserError("Escolha pelo menos uma equipe para o coordenador.");
   await guardAdminChange(sql, user, email, role);
-  await db.upsertAppUser(sql, email, role, user.email);
+  await db.upsertAppUser(sql, email, { role, teams }, user.email);
   return usersPayload(sql, user);
 }
 

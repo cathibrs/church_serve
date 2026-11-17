@@ -93,6 +93,7 @@ export function EscalaPage({
       try {
         const data = await api.day(d, t);
         setDay(data);
+        setDefaults(data.default_active); // o padrão de posições é de cada equipe
         const activeIds = data.volunteers.filter((v) => v.active).map((v) => v.id);
         const next: Record<string, number> = {};
         let act = new Set(data.default_active);
@@ -750,9 +751,10 @@ Obs.: ${v.observation}` : ""}`}
         onChange={changeActive}
         onSaveDefault={async () => {
           try {
-            const r = await api.setDefaultPositions([...active]);
+            if (!day) return;
+            const r = await api.setDefaultPositions([...active], day.team);
             setDefaults(r.default_active);
-            toast.success("Posições salvas como padrão para os próximos cultos.");
+            toast.success("Posições salvas como padrão para os próximos cultos desta equipe.");
           } catch (e) {
             toast.error((e as Error).message);
           }

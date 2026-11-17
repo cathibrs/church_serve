@@ -92,66 +92,159 @@ describe("acesso", () => {
   });
 });
 
-describe("acessos e papel de admin", () => {
-  const MEMBER = "membro@igreja.org";
-  const emails = (data: any) => data.users.map((u: any) => `${u.email}:${u.role}`);
+describe("acessos: admin e coordenador", () => {
+  const COORD = "coordenador@igreja.org";
+  const OTHER = "Domingo_Noite_A";
+  const WED = "Quarta-Feira_Noite_A";
+  const summary = (data: any) => data.users.map((u: any) => `${u.email}:${u.role}:${u.teams.join("+")}`);
+  const forbidden = (r: any) => r.status === 401 && r.data.code === "forbidden";
+  let outsiderId: number;
 
-  it("init informa quem está logado e o papel", async () => {
-    expect((await call("/api/init")).data.user).toEqual({ email: LEADER, role: "admin" });
+  it("init informa quem está logado, o papel e as equipes", async () => {
+    const { data } = await call("/api/init");
+    expect(data.user).toEqual({ email: LEADER, role: "admin", teams: [] });
+    expect(data.teams.length).toBeGreaterThanOrEqual(6);
+    outsiderId = (await call("/api/volunteer", { name: "De Outra Equipe", gender: "Feminino", team: OTHER })).data.id;
   });
 
-  it("admin libera um e-mail e a pessoa passa a entrar como membro", async () => {
-    expect((await call("/api/init", undefined, MEMBER)).data.code).toBe("forbidden");
-    const r = await call("/api/users", { email: `  ${MEMBER.toUpperCase()} ` });
+  it("coordenador só é liberado com pelo menos uma equipe válida", async () => {
+    expect(forbidden(await call("/api/init", undefined, COORD))).toBe(true);
+    expect((await call("/api/users", { email: COORD, role: "coordinator" })).status).toBe(400);
+    expect((await call("/api/users", { email: COORD, role: "coordinator", teams: [] })).status).toBe(400);
+    expect((await call("/api/users", { email: COORD, role: "coordinator", teams: ["Equipe Inventada"] })).status).toBe(400);
+    expect((await call("/api/users", { email: COORD, role: "member", teams: [TEAM] })).status).toBe(400);
+
+    const r = await call("/api/users", { email: `  ${COORD.toUpperCase()} `, role: "coordinator", teams: [WED, TEAM, TEAM] });
     expect(r.status).toBe(200);
-    expect(emails(r.data)).toEqual([`${LEADER}:admin`, `${MEMBER}:member`]);
+    expect(summary(r.data)).toEqual([`${LEADER}:admin:`, `${COORD}:coordinator:${TEAM}+${WED}`]);
     expect(r.data.users[1]).toMatchObject({ created_by: LEADER, has_account: false, verified: false });
-    expect((await call("/api/init", undefined, MEMBER)).data.user).toEqual({ email: MEMBER, role: "member" });
+    expect(r.data.teams).toContain(OTHER);
   });
 
   it("a lista mostra quem já criou conta e confirmou o e-mail", async () => {
-    await sql`INSERT INTO neon_auth."user" (name, email, "emailVerified") VALUES ('Fulana', 'Membro@Igreja.org', true)`;
+    await sql`INSERT INTO neon_auth."user" (name, email, "emailVerified") VALUES ('Fulana', 'Coordenador@Igreja.org', true)`;
     const { data } = await call("/api/users");
     expect(data.me).toBe(LEADER);
-    expect(data.users[1]).toMatchObject({ email: MEMBER, name: "Fulana", has_account: true, verified: true });
+    expect(data.users[1]).toMatchObject({ email: COORD, name: "Fulana", has_account: true, verified: true });
   });
 
-  it("membro usa a escala, mas não vê nem altera os acessos", async () => {
-    expect((await call("/api/volunteers", undefined, MEMBER)).status).toBe(200);
+  it("coordenador só recebe as equipes dele", async () => {
+    const { data } = await call("/api/init", undefined, COORD);
+    expect(data.user).toEqual({ email: COORD, role: "coordinator", teams: [TEAM, WED] });
+    expect(data.teams).toEqual([TEAM, WED]);
+    expect([TEAM, WED]).toContain(data.team);
+    // quarta-feira sugere a equipe de quarta dele
+    expect((await call("/api/day?date=2026-12-09", undefined, COORD)).data.team).toBe(WED);
+  });
+
+  it("coordenador vê a equipe dele e a API recusa as outras", async () => {
+    const own = await call(`/api/day?date=${DATE}&team=${TEAM}`, undefined, COORD);
+    expect(own.status).toBe(200);
+    expect(own.data.volunteers).toHaveLength(36);
+
+    const other = await call(`/api/day?date=${DATE}&team=${OTHER}`, undefined, COORD);
+    expect(forbidden(other)).toBe(true);
+    expect(other.data.volunteers).toBeUndefined();
+    expect(forbidden(await call(`/api/volunteers?team=${OTHER}`, undefined, COORD))).toBe(true);
+    expect(forbidden(await call(`/api/history?team=${OTHER}`, undefined, COORD))).toBe(true);
+
+    // sem filtro, só vem o que é das equipes dele
+    const vols = (await call("/api/volunteers", undefined, COORD)).data;
+    expect(vols.teams).toEqual([TEAM, WED]);
+    expect(vols.volunteers).toHaveLength(36);
+    expect(vols.volunteers.some((v: any) => v.id === outsiderId)).toBe(false);
+    const hist = (await call("/api/history", undefined, COORD)).data;
+    expect(hist.rows.every((r: any) => r.Equipe === TEAM)).toBe(true);
+    // o admin continua vendo tudo
+    expect((await call("/api/volunteers")).data.volunteers.some((v: any) => v.id === outsiderId)).toBe(true);
+  });
+
+  it("coordenador não gera, valida nem salva escala de outra equipe", async () => {
+    const mine = (await call(`/api/day?date=${DATE}&team=${TEAM}`, undefined, COORD)).data.volunteers.map((v: any) => v.id);
+    expect((await call("/api/generate", { date: DATE, present_ids: mine }, COORD)).status).toBe(400); // sem equipe
+    for (const path of ["/api/generate", "/api/validate", "/api/save"]) {
+      expect(forbidden(await call(path, { date: DATE, team: OTHER, present_ids: [outsiderId], assignments: [] }, COORD))).toBe(true);
+    }
+    // na equipe dele, mas com gente de fora
+    const mixed = await call(
+      "/api/save",
+      { date: "2027-02-07", team: TEAM, present_ids: [...mine, outsiderId], assignments: [] },
+      COORD,
+    );
+    expect(mixed.status).toBe(400);
+    expect(mixed.data.error).toContain("não são desta equipe");
+    const [saved] = await sql`SELECT COUNT(*)::int AS n FROM schedules`;
+    expect(saved.n).toBe(0);
+    // na equipe dele, funciona
+    const gen = await call("/api/generate", { date: DATE, team: TEAM, present_ids: mine }, COORD);
+    expect(gen.status).toBe(200);
+    expect(gen.data.assignments.length).toBeGreaterThan(36);
+  });
+
+  it("coordenador não cadastra nem altera voluntário de outra equipe", async () => {
+    expect(forbidden(await call("/api/volunteer", { name: "Novo De Fora", gender: "Masculino", team: OTHER }, COORD))).toBe(true);
+    // não pode puxar para a equipe dele alguém de outra
+    expect(forbidden(await call("/api/volunteer", { id: outsiderId, name: "De Outra Equipe", gender: "Feminino", team: TEAM }, COORD))).toBe(true);
+    const [still] = await sql`SELECT team FROM volunteers WHERE id = ${outsiderId}`;
+    expect(still.team).toBe(OTHER);
+    // nem mandar para fora alguém da equipe dele
+    const own = (await call(`/api/volunteers?team=${TEAM}`, undefined, COORD)).data.volunteers[0];
+    expect(forbidden(await call("/api/volunteer", { ...own, team: OTHER }, COORD))).toBe(true);
+    // na própria equipe pode editar
+    expect((await call("/api/volunteer", { ...own, observation: "" }, COORD)).status).toBe(200);
+  });
+
+  it("posições padrão do coordenador valem só para a equipe dele", async () => {
+    expect((await call("/api/positions/default", { codes: ["01"] }, COORD)).status).toBe(400); // sem equipe
+    expect(forbidden(await call("/api/positions/default", { codes: ["01"], team: OTHER }, COORD))).toBe(true);
+    expect((await call("/api/positions/default", { codes: ["03", "R02"], team: WED }, COORD)).status).toBe(200);
+    expect((await call(`/api/day?date=2026-12-09&team=${WED}`, undefined, COORD)).data.default_active).toEqual(["03", "R02"]);
+    // as outras equipes continuam com o padrão geral
+    expect((await call(`/api/day?date=${DATE}&team=${TEAM}`)).data.default_active.length).toBeGreaterThan(50);
+  });
+
+  it("coordenador não vê nem altera os acessos", async () => {
     for (const r of [
-      await call("/api/users", undefined, MEMBER),
-      await call("/api/users", { email: "amigo@gmail.com", role: "admin" }, MEMBER),
-      await call("/api/users/remove", { email: LEADER }, MEMBER),
+      await call("/api/users", undefined, COORD),
+      await call("/api/users", { email: "amigo@gmail.com", role: "admin" }, COORD),
+      await call("/api/users/remove", { email: LEADER }, COORD),
     ]) {
-      expect(r.status).toBe(401);
-      expect(r.data.code).toBe("forbidden");
+      expect(forbidden(r)).toBe(true);
       expect(r.data.users).toBeUndefined();
     }
-    expect(emails((await call("/api/users")).data)).toEqual([`${LEADER}:admin`, `${MEMBER}:member`]);
+    expect(summary((await call("/api/users")).data)).toEqual([`${LEADER}:admin:`, `${COORD}:coordinator:${TEAM}+${WED}`]);
   });
 
   it("o último admin não pode ser rebaixado nem removido, nem tirar o próprio acesso", async () => {
-    const demote = await call("/api/users", { email: LEADER, role: "member" });
-    expect(demote.status).toBe(400);
+    expect((await call("/api/users", { email: LEADER, role: "coordinator", teams: [TEAM] })).status).toBe(400);
     expect((await call("/api/users/remove", { email: LEADER })).status).toBe(400);
 
-    await call("/api/users", { email: MEMBER, role: "admin" });
+    await call("/api/users", { email: COORD, role: "admin" });
+    expect((await call("/api/init", undefined, COORD)).data.user).toEqual({ email: COORD, role: "admin", teams: [] });
     // com dois admins: um rebaixa o outro, mas ninguém rebaixa a si mesmo
-    expect((await call("/api/users", { email: LEADER, role: "member" })).status).toBe(400);
-    expect((await call("/api/users", { email: LEADER, role: "member" }, MEMBER)).status).toBe(200);
-    expect((await call("/api/users", { email: MEMBER, role: "member" }, MEMBER)).status).toBe(400);
-    expect((await call("/api/users", { email: LEADER, role: "admin" }, MEMBER)).status).toBe(200);
-    expect((await call("/api/users", { email: MEMBER, role: "member" })).status).toBe(200);
+    expect((await call("/api/users", { email: LEADER, role: "coordinator", teams: [TEAM] })).status).toBe(400);
+    expect((await call("/api/users", { email: LEADER, role: "coordinator", teams: [TEAM] }, COORD)).status).toBe(200);
+    expect((await call("/api/users", { email: COORD, role: "coordinator", teams: [TEAM] }, COORD)).status).toBe(400);
+    expect((await call("/api/users", { email: LEADER, role: "admin" }, COORD)).status).toBe(200);
+    expect((await call("/api/users", { email: COORD, role: "coordinator", teams: [TEAM, WED] })).status).toBe(200);
+  });
+
+  it("coordenador sem equipe (registro antigo) não entra", async () => {
+    await sql`INSERT INTO app_users (email, role) VALUES ('antigo@igreja.org', 'coordinator')`;
+    const r = await call("/api/init", undefined, "antigo@igreja.org");
+    expect(forbidden(r)).toBe(true);
+    expect(r.data.error).toContain("equipe");
+    await sql`DELETE FROM app_users WHERE email = 'antigo@igreja.org'`;
   });
 
   it("remover o acesso bloqueia a pessoa na hora", async () => {
-    const r = await call("/api/users/remove", { email: MEMBER });
-    expect(emails(r.data)).toEqual([`${LEADER}:admin`]);
-    expect((await call("/api/volunteers", undefined, MEMBER)).data.code).toBe("forbidden");
+    const r = await call("/api/users/remove", { email: COORD });
+    expect(summary(r.data)).toEqual([`${LEADER}:admin:`]);
+    expect(forbidden(await call("/api/volunteers", undefined, COORD))).toBe(true);
   });
 
   it("e-mail ou papel inválido: 400", async () => {
-    expect((await call("/api/users", { email: "sem-arroba" })).status).toBe(400);
+    expect((await call("/api/users", { email: "sem-arroba", role: "admin" })).status).toBe(400);
     expect((await call("/api/users", { email: "a@b.co", role: "dono" })).status).toBe(400);
   });
 });

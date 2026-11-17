@@ -21,7 +21,7 @@ async function main() {
   const { neon } = await import("@neondatabase/serverless");
   const sql = neon(url) as unknown as Sql;
   await applySchema(sql, readFileSync(new URL("../db/schema.sql", import.meta.url), "utf-8"));
-  await upsertAppUser(sql, email, "admin", "npm run admin");
+  await upsertAppUser(sql, email, { role: "admin", teams: [] }, "npm run admin");
   console.log(`${email} agora é administrador (${await countAdmins(sql)} administrador(es) no total).`);
 }
 

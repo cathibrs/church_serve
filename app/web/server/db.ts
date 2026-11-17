@@ -361,10 +361,12 @@ export async function listSchedules(sql: Sql, limit = 30): Promise<ScheduleRow[]
   return rows as unknown as ScheduleRow[];
 }
 
-/** Equipe da última escala salva nesse dia da semana (ou null). */
-export async function lastTeamFor(sql: Sql, serviceType: string): Promise<string | null> {
+/** Equipe da última escala salva nesse dia da semana (ou null). `teams` limita a busca a essas equipes. */
+export async function lastTeamFor(sql: Sql, serviceType: string, teams: string[] | null = null): Promise<string | null> {
   const rows = await sql`
-    SELECT team FROM schedules WHERE service_type = ${serviceType} AND team <> ''
+    SELECT team FROM schedules
+    WHERE service_type = ${serviceType} AND team <> ''
+      AND (${teams === null}::boolean OR team = ANY(${teams ?? []}::text[]))
     ORDER BY service_date DESC, id DESC LIMIT 1`;
   return rows[0]?.team ?? null;
 }
@@ -468,11 +470,16 @@ export async function getHistoryMatrix(sql: Sql, team: string | null = null): Pr
 
 // ---------------------------------------------------------------- acessos (app_users)
 
-export type Role = "admin" | "member";
+export type Role = "admin" | "coordinator";
 
-export interface AppUser {
-  email: string;
+/** Acesso de uma pessoa: o papel e, para coordenador, as equipes que ela coordena. */
+export interface Access {
   role: Role;
+  teams: string[];
+}
+
+export interface AppUser extends Access {
+  email: string;
   created_at: Date;
   created_by: string | null;
   /** nome informado ao criar a conta no login (null se ainda não criou) */
@@ -489,20 +496,33 @@ export function cleanEmail(value: unknown): string {
 }
 
 export function cleanRole(value: unknown): Role {
-  if (value === "admin" || value === "member") return value;
+  if (value === "admin" || value === "coordinator") return value;
   throw new UserError("Papel inválido.");
 }
 
-/** Papel de quem tem acesso, ou null se o e-mail não está liberado. */
-export async function getAppUserRole(sql: Sql, email: string): Promise<Role | null> {
-  const rows = await sql`SELECT role FROM app_users WHERE email = ${email.trim().toLowerCase()}`;
-  return (rows[0]?.role as Role | undefined) ?? null;
+/** Equipes de um coordenador: precisam existir (`valid`) e não podem repetir. */
+export function cleanTeams(value: unknown, valid: string[]): string[] {
+  if (!Array.isArray(value)) throw new UserError("Informe as equipes do coordenador.");
+  const byKey = new Map(valid.map((t) => [normalizeTeam(t), t]));
+  const teams = new Set<string>();
+  for (const item of value) {
+    const team = byKey.get(normalizeTeam(item));
+    if (!team) throw new UserError(`Equipe desconhecida: ${String(item)}.`);
+    teams.add(team);
+  }
+  return [...teams].sort();
+}
+
+/** Acesso de quem está liberado, ou null se o e-mail não está na lista. */
+export async function getAccess(sql: Sql, email: string): Promise<Access | null> {
+  const rows = await sql`SELECT role, teams FROM app_users WHERE email = ${email.trim().toLowerCase()}`;
+  return rows.length ? { role: rows[0].role as Role, teams: (rows[0].teams as string[]) ?? [] } : null;
 }
 
 /** Lista de acessos, com a situação da conta de cada e-mail no login. */
 export async function listAppUsers(sql: Sql): Promise<AppUser[]> {
   const rows = await sql`
-    SELECT a.email, a.role, a.created_at, a.created_by, u.name,
+    SELECT a.email, a.role, a.teams, a.created_at, a.created_by, u.name,
            (u.email IS NOT NULL) AS has_account, COALESCE(u."emailVerified", false) AS verified
     FROM app_users a
     LEFT JOIN neon_auth."user" u ON lower(u.email) = a.email
@@ -510,11 +530,13 @@ export async function listAppUsers(sql: Sql): Promise<AppUser[]> {
   return rows as unknown as AppUser[];
 }
 
-/** Libera um e-mail ou muda o papel de quem já está liberado. */
-export async function upsertAppUser(sql: Sql, email: string, role: Role, by: string | null): Promise<void> {
+/** Libera um e-mail ou muda o papel e as equipes de quem já está liberado. */
+export async function upsertAppUser(sql: Sql, email: string, access: Access, by: string | null): Promise<void> {
+  const teams = access.role === "admin" ? [] : access.teams;
   await sql`
-    INSERT INTO app_users (email, role, created_by) VALUES (${email}, ${role}, ${by})
-    ON CONFLICT (email) DO UPDATE SET role = excluded.role`;
+    INSERT INTO app_users (email, role, teams, created_by)
+    VALUES (${email}, ${access.role}, ${teams}::text[], ${by})
+    ON CONFLICT (email) DO UPDATE SET role = excluded.role, teams = excluded.teams`;
 }
 
 export async function removeAppUser(sql: Sql, email: string): Promise<void> {
@@ -523,4 +545,10 @@ export async function removeAppUser(sql: Sql, email: string): Promise<void> {
 
 export async function countAdmins(sql: Sql): Promise<number> {
   return (await sql`SELECT COUNT(*)::int AS n FROM app_users WHERE role = 'admin'`)[0].n;
+}
+
+/** Equipe atual de um voluntário (null se o id não existe). */
+export async function getVolunteerTeam(sql: Sql, id: number): Promise<string | null> {
+  const rows = await sql`SELECT team FROM volunteers WHERE id = ${id}`;
+  return rows.length ? (rows[0].team as string) : null;
 }

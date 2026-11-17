@@ -1,7 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
-import { Loader2, ShieldCheck, Trash2, UserPlus } from "lucide-react";
+import { ChevronDown, Loader2, Pencil, Trash2, UserPlus, Users, X } from "lucide-react";
 import { api, type AccessList, type AccessUser, type Role } from "@/lib/api";
+import { teamLabel } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -9,22 +10,24 @@ import { Input } from "@/components/ui/input";
 import { Confirm } from "@/components/ui/alert-dialog";
 import { Tooltip } from "@/components/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
-const ROLE_LABEL: Record<Role, string> = { admin: "Administrador", member: "Membro" };
+const ROLE_LABEL: Record<Role, string> = { admin: "Administrador", coordinator: "Coordenador" };
 
-function RoleSelect({ value, onChange, disabled }: { value: Role; onChange: (r: Role) => void; disabled?: boolean }) {
-  return (
-    <Select value={value} onValueChange={(v) => onChange(v as Role)} disabled={disabled}>
-      <SelectTrigger className="w-[160px]" aria-label="Papel">
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value="member">{ROLE_LABEL.member}</SelectItem>
-        <SelectItem value="admin">{ROLE_LABEL.admin}</SelectItem>
-      </SelectContent>
-    </Select>
-  );
+interface Draft {
+  email: string;
+  role: Role;
+  teams: string[];
+  /** true = alterando um acesso que já existe (o e-mail não muda) */
+  editing: boolean;
 }
+
+const EMPTY: Draft = { email: "", role: "coordinator", teams: [], editing: false };
 
 function AccountStatus({ user }: { user: AccessUser }) {
   if (!user.has_account) return <Badge variant="outline">Ainda não criou a conta</Badge>;
@@ -32,11 +35,41 @@ function AccountStatus({ user }: { user: AccessUser }) {
   return <Badge variant="success">Conta ativa</Badge>;
 }
 
-/** Tela do administrador: quem pode entrar no sistema e com qual papel. */
+/** Escolha de uma ou mais equipes (as do coordenador). */
+function TeamPicker({ all, value, onChange }: { all: string[]; value: string[]; onChange: (teams: string[]) => void }) {
+  const label =
+    value.length === 0 ? "Escolher equipes" : value.length === 1 ? teamLabel(value[0]) : `${value.length} equipes`;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button type="button" variant="outline" className="w-[220px] justify-between font-normal" aria-label="Equipes">
+          <span className="flex min-w-0 items-center gap-2">
+            <Users className="size-4 shrink-0 text-muted-foreground" />
+            <span className={value.length ? "truncate" : "truncate text-muted-foreground"}>{label}</span>
+          </span>
+          <ChevronDown className="size-4 opacity-50" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-[240px]">
+        {all.map((team) => (
+          <DropdownMenuCheckboxItem
+            key={team}
+            checked={value.includes(team)}
+            onSelect={(e) => e.preventDefault()} // mantém aberto para marcar várias
+            onCheckedChange={(on) => onChange(on ? [...value, team].sort() : value.filter((t) => t !== team))}
+          >
+            {teamLabel(team)}
+          </DropdownMenuCheckboxItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** Tela do administrador: quem pode entrar no sistema, com qual papel e em quais equipes. */
 export function AcessosPage() {
   const [list, setList] = useState<AccessList | null>(null);
-  const [email, setEmail] = useState("");
-  const [role, setRole] = useState<Role>("member");
+  const [draft, setDraft] = useState<Draft>(EMPTY);
   const [busy, setBusy] = useState(false);
   const [removing, setRemoving] = useState<AccessUser | null>(null);
 
@@ -44,22 +77,31 @@ export function AcessosPage() {
     api.users().then(setList).catch((e) => toast.error(e.message));
   }, []);
 
-  async function run(action: () => Promise<AccessList>, done: string) {
+  async function run(action: () => Promise<AccessList>, done: string): Promise<boolean> {
     setBusy(true);
     try {
       setList(await action());
       toast.success(done);
+      return true;
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
+      return false;
     } finally {
       setBusy(false);
     }
   }
 
-  const add = (e: FormEvent) => {
+  const needsTeam = draft.role === "coordinator" && draft.teams.length === 0;
+
+  const submit = async (e: FormEvent) => {
     e.preventDefault();
-    const address = email.trim().toLowerCase();
-    run(() => api.saveUser(address, role), `${address} liberado.`).then(() => setEmail(""));
+    if (needsTeam) {
+      toast.error("Escolha pelo menos uma equipe para o coordenador.");
+      return;
+    }
+    const address = draft.email.trim().toLowerCase();
+    const done = draft.editing ? `Acesso de ${address} atualizado.` : `${address} liberado.`;
+    if (await run(() => api.saveUser(address, draft.role, draft.teams), done)) setDraft(EMPTY);
   };
 
   const admins = list?.users.filter((u) => u.role === "admin").length ?? 0;
@@ -75,23 +117,43 @@ export function AcessosPage() {
         </div>
       </header>
 
-      <form onSubmit={add} className="flex flex-wrap items-center gap-2 border-b px-5 py-2.5">
+      <form onSubmit={submit} className="flex flex-wrap items-center gap-2 border-b px-5 py-2.5">
         <Input
           type="email"
           required
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          disabled={draft.editing}
+          value={draft.email}
+          onChange={(e) => setDraft({ ...draft, email: e.target.value })}
           placeholder="E-mail a liberar"
           aria-label="E-mail a liberar"
           className="w-72"
         />
-        <RoleSelect value={role} onChange={setRole} />
+        <Select value={draft.role} onValueChange={(v) => setDraft({ ...draft, role: v as Role })}>
+          <SelectTrigger className="w-[170px]" aria-label="Papel">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="coordinator">{ROLE_LABEL.coordinator}</SelectItem>
+            <SelectItem value="admin">{ROLE_LABEL.admin}</SelectItem>
+          </SelectContent>
+        </Select>
+        {draft.role === "coordinator" && (
+          <TeamPicker all={list?.teams ?? []} value={draft.teams} onChange={(teams) => setDraft({ ...draft, teams })} />
+        )}
         <Button type="submit" disabled={busy}>
-          {busy ? <Loader2 className="animate-spin" /> : <UserPlus />} Liberar acesso
+          {busy ? <Loader2 className="animate-spin" /> : draft.editing ? <Pencil /> : <UserPlus />}
+          {draft.editing ? "Salvar alteração" : "Liberar acesso"}
         </Button>
+        {draft.editing && (
+          <Button type="button" variant="ghost" onClick={() => setDraft(EMPTY)}>
+            <X /> Cancelar
+          </Button>
+        )}
         <p className="basis-full text-xs text-muted-foreground">
-          A pessoa cria a própria conta no site com esse e-mail e confirma pelo código recebido. Membros usam a
-          escala; administradores também gerenciam esta lista.
+          {draft.editing
+            ? `Alterando o acesso de ${draft.email}.`
+            : "A pessoa cria a própria conta no site com esse e-mail e confirma pelo código recebido."}{" "}
+          Coordenador vê e altera só as equipes escolhidas; administrador vê todas e gerencia esta lista.
         </p>
       </form>
 
@@ -104,8 +166,9 @@ export function AcessosPage() {
                 <th className="px-2">Nome</th>
                 <th className="px-2">Situação da conta</th>
                 <th className="px-2">Papel</th>
-                <th className="px-2">Liberado por</th>
-                <th className="w-12" />
+                <th className="px-2">Equipes</th>
+                <th className="px-2">Liberado em</th>
+                <th className="w-24" />
               </tr>
             </thead>
             <tbody>
@@ -118,7 +181,7 @@ export function AcessosPage() {
                   : "O sistema precisa de pelo menos um administrador.";
                 return (
                   <tr key={u.email} className="h-11 border-t transition-colors hover:bg-muted/40">
-                    <td className="max-w-[320px] truncate pl-4 font-medium" title={u.email}>
+                    <td className="max-w-[300px] truncate pl-4 font-medium" title={u.email}>
                       {u.email}
                       {self && <span className="ml-2 text-xs font-normal text-muted-foreground">(você)</span>}
                     </td>
@@ -126,39 +189,57 @@ export function AcessosPage() {
                     <td className="px-2">
                       <AccountStatus user={u} />
                     </td>
+                    <td className="px-2 whitespace-nowrap">{ROLE_LABEL[u.role]}</td>
                     <td className="px-2">
-                      {locked ? (
-                        <Tooltip content={why}>
-                          <span className="inline-flex items-center gap-1.5">
-                            <ShieldCheck className="size-4 text-muted-foreground" /> {ROLE_LABEL[u.role]}
-                          </span>
-                        </Tooltip>
+                      {u.role === "admin" ? (
+                        <span className="text-muted-foreground">Todas</span>
                       ) : (
-                        <RoleSelect
-                          value={u.role}
-                          disabled={busy}
-                          onChange={(next) =>
-                            run(() => api.saveUser(u.email, next), `${u.email} agora é ${ROLE_LABEL[next].toLowerCase()}.`)
-                          }
-                        />
+                        <span className="flex flex-wrap gap-1 py-1">
+                          {u.teams.map((t) => (
+                            <Badge key={t} variant="secondary">
+                              {teamLabel(t)}
+                            </Badge>
+                          ))}
+                          {u.teams.length === 0 && <Badge variant="destructive">Sem equipe</Badge>}
+                        </span>
                       )}
                     </td>
-                    <td className="max-w-[220px] truncate px-2 text-xs text-muted-foreground" title={u.created_by ?? undefined}>
-                      {u.created_at.slice(0, 10).split("-").reverse().join("/")} · {u.created_by ?? "—"}
+                    <td
+                      className="px-2 text-xs whitespace-nowrap text-muted-foreground"
+                      title={u.created_by ? `Liberado por ${u.created_by}` : undefined}
+                    >
+                      {u.created_at.slice(0, 10).split("-").reverse().join("/")}
                     </td>
-                    <td className="pr-3 text-right">
-                      {!locked && (
-                        <Tooltip content="Remover acesso">
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            aria-label={`Remover acesso de ${u.email}`}
-                            disabled={busy}
-                            onClick={() => setRemoving(u)}
-                          >
-                            <Trash2 />
-                          </Button>
+                    <td className="pr-3 text-right whitespace-nowrap">
+                      {locked ? (
+                        <Tooltip content={why}>
+                          <span className="text-xs text-muted-foreground">fixo</span>
                         </Tooltip>
+                      ) : (
+                        <>
+                          <Tooltip content="Alterar papel e equipes">
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              aria-label={`Alterar acesso de ${u.email}`}
+                              disabled={busy}
+                              onClick={() => setDraft({ email: u.email, role: u.role, teams: u.teams, editing: true })}
+                            >
+                              <Pencil />
+                            </Button>
+                          </Tooltip>
+                          <Tooltip content="Remover acesso">
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              aria-label={`Remover acesso de ${u.email}`}
+                              disabled={busy}
+                              onClick={() => setRemoving(u)}
+                            >
+                              <Trash2 />
+                            </Button>
+                          </Tooltip>
+                        </>
                       )}
                     </td>
                   </tr>
@@ -184,6 +265,7 @@ export function AcessosPage() {
         onConfirm={() => {
           const target = removing!;
           setRemoving(null);
+          if (draft.editing && draft.email === target.email) setDraft(EMPTY);
           run(() => api.removeUser(target.email), `Acesso de ${target.email} removido.`);
         }}
       />

@@ -77,10 +77,19 @@ CREATE TABLE IF NOT EXISTS app_meta (
 );
 
 -- Quem pode usar o sistema. O login (Neon Auth) aceita cadastro de qualquer pessoa;
--- só entra quem tem o e-mail aqui. 'admin' também gerencia esta lista pela tela Acessos.
+-- só entra quem tem o e-mail aqui.
+--   admin        vê todas as equipes e gerencia esta lista pela tela Acessos
+--   coordinator  vê e altera só as equipes listadas em "teams" (pelo menos uma)
 CREATE TABLE IF NOT EXISTS app_users (
     email      TEXT PRIMARY KEY CHECK (email = lower(email)),
-    role       TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('admin', 'member')),
+    role       TEXT NOT NULL DEFAULT 'coordinator',
+    teams      TEXT[] NOT NULL DEFAULT '{}',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_by TEXT
 );
+-- Ajuste de bancos criados antes de existir o papel de coordenador (pode rodar de novo).
+ALTER TABLE app_users ADD COLUMN IF NOT EXISTS teams TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE app_users DROP CONSTRAINT IF EXISTS app_users_role_check;
+UPDATE app_users SET role = 'coordinator' WHERE role = 'member';
+ALTER TABLE app_users ALTER COLUMN role SET DEFAULT 'coordinator';
+ALTER TABLE app_users ADD CONSTRAINT app_users_role_check CHECK (role IN ('admin', 'coordinator'));

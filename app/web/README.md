@@ -79,8 +79,9 @@ O comando mostra quantas linhas leu e quantas gravou em cada tabela. O que ele f
 
 Quem pode entrar fica na tabela `app_users` do banco, com um papel:
 
-- **Membro**: usa a escala, os voluntários e o histórico.
-- **Administrador**: além disso, libera e remove e-mails na tela **Acessos**.
+- **Coordenador**: tem uma ou mais equipes e só vê e altera a escala, os voluntários e o histórico
+  dessas equipes. A API recusa qualquer pedido sobre outra equipe.
+- **Administrador**: vê todas as equipes e libera e remove e-mails na tela **Acessos**.
 
 O primeiro administrador é criado pelo terminal (o mesmo comando serve para recuperar o acesso se
 ninguém mais conseguir entrar na tela Acessos):
@@ -89,8 +90,9 @@ ninguém mais conseguir entrar na tela Acessos):
 npm run admin -- pessoa@exemplo.com
 ```
 
-Daí em diante é tudo pelo site: o administrador libera o e-mail na tela Acessos, e a pessoa abre o
-site, clica em **Criar conta** com esse e-mail e confirma com o código recebido. Quem criar conta
+Daí em diante é tudo pelo site: o administrador libera o e-mail na tela Acessos (para coordenador,
+escolhendo as equipes dele), e a pessoa abre o site, clica em **Criar conta** com esse e-mail e
+confirma com o código recebido. Quem criar conta
 com um e-mail não liberado cai na tela "Sem acesso" e não vê nenhum dado. Remover um e-mail da
 lista bloqueia a pessoa na hora; não é preciso publicar o site de novo.
 

@@ -50,15 +50,18 @@ export interface InitData {
   positions: Position[];
   default_active: string[];
   /** quem está logado, já validado pela API */
-  user: { email: string; role: Role };
+  user: { email: string; role: Role; teams: string[] };
 }
 
-export type Role = "admin" | "member";
+/** admin vê todas as equipes e gerencia os acessos; coordinator vê só as equipes dele. */
+export type Role = "admin" | "coordinator";
 
 /** Um e-mail com acesso liberado e a situação da conta dele no login. */
 export interface AccessUser {
   email: string;
   role: Role;
+  /** equipes do coordenador (vazio para admin) */
+  teams: string[];
   created_at: string;
   created_by: string | null;
   name: string | null;
@@ -68,6 +71,8 @@ export interface AccessUser {
 
 export interface AccessList {
   me: string;
+  /** todas as equipes que existem, para escolher as do coordenador */
+  teams: string[];
   users: AccessUser[];
 }
 
@@ -195,9 +200,10 @@ export const api = {
     request<{ volunteers: Volunteer[]; teams: string[] }>(`/api/volunteers?team=${encodeURIComponent(team || "")}`),
   saveVolunteer: (body: Partial<Volunteer>) => request<{ id: number }>("/api/volunteer", body),
   history: (team?: string) => request<HistoryData>(`/api/history?team=${encodeURIComponent(team || "")}`),
-  setDefaultPositions: (codes: string[]) => request<{ default_active: string[] }>("/api/positions/default", { codes }),
+  setDefaultPositions: (codes: string[], team: string) =>
+    request<{ default_active: string[] }>("/api/positions/default", { codes, team }),
   // só para administradores
   users: () => request<AccessList>("/api/users"),
-  saveUser: (email: string, role: Role) => request<AccessList>("/api/users", { email, role }),
+  saveUser: (email: string, role: Role, teams: string[]) => request<AccessList>("/api/users", { email, role, teams }),
   removeUser: (email: string) => request<AccessList>("/api/users/remove", { email }),
 };

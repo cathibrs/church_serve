@@ -34,7 +34,11 @@ COMO USAR
 
 ACESSOS (só administradores)
 - No menu "Acessos", o administrador libera o e-mail de quem pode usar o sistema e
-  escolhe o papel: Membro (usa a escala) ou Administrador (também gerencia os acessos).
+  escolhe o papel:
+    Coordenador    vê e altera só as equipes escolhidas para ele (uma ou mais)
+    Administrador  vê todas as equipes e gerencia os acessos
+- Para mudar o papel ou as equipes de alguém, use o lápis na linha da pessoa.
+- "Usar como padrão", na tela de posições, agora vale para a equipe que está aberta.
 - A pessoa liberada cria a própria conta no site, com esse e-mail.
 - Remover um e-mail da lista bloqueia a pessoa na hora.
 - Sempre fica pelo menos um administrador: o sistema não deixa remover o último.
