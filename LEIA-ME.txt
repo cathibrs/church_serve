@@ -7,14 +7,12 @@ podem usar ao mesmo tempo, de qualquer computador ou celular.
 
 COMO ENTRAR
 1. Abra o endereço do site (quem publicou o sistema informa o link).
-2. Na primeira vez, clique em "Criar conta", informe seu nome, seu e-mail e uma senha
-   de pelo menos 8 caracteres. Você recebe um código de 6 números por e-mail (confira
-   a caixa de spam); digite o código para confirmar.
-3. Nas próximas vezes, é só "Entrar" com e-mail e senha.
-4. Só entram os e-mails liberados por um administrador. Se aparecer "Sem acesso", peça
-   a um administrador para liberar o seu e-mail na tela "Acessos".
-5. Esqueceu a senha? Clique em "Esqueci a senha" e siga o código enviado por e-mail.
-6. Para sair, use "Sair" no menu lateral.
+2. Entre com o seu e-mail e a senha que o administrador lhe passou. Não é preciso criar
+   conta nem confirmar o e-mail: o administrador já faz isso ao liberar o seu acesso.
+3. Se quiser trocar a senha, use "Alterar senha" no menu lateral. Não é obrigatório.
+4. Perdeu a senha? Peça ao administrador para gerar outra (ou use "Esqueci a senha",
+   que manda um código para o seu e-mail).
+5. Para sair, use "Sair" no menu lateral.
 
 COMO USAR
 1. Em "Escala", confira a data e a equipe. A equipe sugerida é a última usada naquele dia.
@@ -37,9 +35,11 @@ ACESSOS (só administradores)
   escolhe o papel:
     Coordenador    vê e altera só as equipes escolhidas para ele (uma ou mais)
     Administrador  vê todas as equipes e gerencia os acessos
+- Ao liberar, o sistema cria a conta e mostra uma senha aleatória, uma única vez, para
+  o administrador repassar à pessoa. Anote antes de fechar: o sistema não guarda a senha.
+- O ícone de chave na linha gera uma senha nova, para quando a anterior se perder.
 - Para mudar o papel ou as equipes de alguém, use o lápis na linha da pessoa.
 - "Usar como padrão", na tela de posições, agora vale para a equipe que está aberta.
-- A pessoa liberada cria a própria conta no site, com esse e-mail.
 - Remover um e-mail da lista bloqueia a pessoa na hora.
 - Sempre fica pelo menos um administrador: o sistema não deixa remover o último.
 

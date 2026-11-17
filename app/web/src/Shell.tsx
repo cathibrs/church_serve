@@ -12,6 +12,7 @@ import { EscalaPage } from "@/pages/Escala";
 import { VoluntariosPage } from "@/pages/Voluntarios";
 import { HistoricoPage } from "@/pages/Historico";
 import { AcessosPage } from "@/pages/Acessos";
+import { ChangePassword } from "@/components/ChangePassword";
 
 export default function Shell({ init, onSignOut }: { init: InitData; onSignOut: () => void }) {
   const isAdmin = init.user.role === "admin";
@@ -21,6 +22,7 @@ export default function Shell({ init, onSignOut }: { init: InitData; onSignOut: 
     return h === "acessos" && isAdmin ? h : "escala";
   });
   const [goto, setGoto] = useState<{ date: string; team: string } | null>(null);
+  const [changingPassword, setChangingPassword] = useState(false);
   const [collapsed, setCollapsed] = useState(() => {
     try {
       if (location.search.includes("menu=recolhido")) return true;
@@ -49,6 +51,7 @@ export default function Shell({ init, onSignOut }: { init: InitData; onSignOut: 
           page={page}
           onPage={setPage}
           onSignOut={onSignOut}
+          onChangePassword={() => setChangingPassword(true)}
           userEmail={init.user.email}
           isAdmin={isAdmin}
           collapsed={collapsed}
@@ -80,6 +83,7 @@ export default function Shell({ init, onSignOut }: { init: InitData; onSignOut: 
           </AnimatePresence>
         </main>
       </div>
+      <ChangePassword open={changingPassword} onOpenChange={setChangingPassword} />
       <Toaster position="bottom-right" richColors closeButton toastOptions={{ className: "text-[13px]" }} />
     </TooltipProvider>
   );

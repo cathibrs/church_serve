@@ -136,17 +136,13 @@ export async function sendVerificationCode(email: string, force = false): Promis
   }
 }
 
-/** Marca que o servidor já mandou um código para este e-mail (evita mandar dois seguidos). */
-export function noteCodeSent(email: string) {
-  lastSent.set(email.trim().toLowerCase(), Date.now());
-}
-
 // ---------------------------------------------------------------- mensagens
 
 const MESSAGES: Record<string, string> = {
   INVALID_EMAIL_OR_PASSWORD: "E-mail ou senha incorretos.",
   INVALID_EMAIL: "E-mail inválido.",
-  INVALID_PASSWORD: "Senha incorreta.",
+  INVALID_PASSWORD: "Senha atual incorreta.",
+  CREDENTIAL_ACCOUNT_NOT_FOUND: "Esta conta não tem senha cadastrada.",
   USER_ALREADY_EXISTS: "Já existe uma conta com esse e-mail. Use Entrar.",
   USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL: "Já existe uma conta com esse e-mail. Use Entrar.",
   USER_NOT_FOUND: "Não há conta com esse e-mail.",

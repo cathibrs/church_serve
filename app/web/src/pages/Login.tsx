@@ -5,7 +5,6 @@ import {
   authClient,
   AuthFailure,
   clearToken,
-  noteCodeSent,
   sendVerificationCode,
   signOut,
   type AuthResult,
@@ -14,14 +13,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-type Step = "entrar" | "criar" | "codigo" | "esqueci" | "nova-senha";
+// Não existe "criar conta" aqui: a conta é criada pelo administrador, na tela Acessos.
+type Step = "entrar" | "codigo" | "esqueci" | "nova-senha";
 
 const signIn = (email: string, password: string) =>
   authClient.signIn.email({ email, password }) as Promise<AuthResult<unknown>>;
 
 const TITLES: Record<Step, [string, string]> = {
-  entrar: ["Entrar", "Use o e-mail liberado pela liderança."],
-  criar: ["Criar conta", "Só e-mails liberados pela liderança conseguem acessar a escala."],
+  entrar: ["Entrar", "Use o e-mail e a senha que você recebeu do administrador."],
   codigo: ["Confirme seu e-mail", "Digite o código de 6 números que enviamos."],
   esqueci: ["Recuperar senha", "Enviaremos um código para o seu e-mail."],
   "nova-senha": ["Nova senha", "Digite o código recebido e escolha a nova senha."],
@@ -42,7 +41,6 @@ export function LoginPage({
   notice?: string;
 }) {
   const [step, setStep] = useState<Step>(unverifiedEmail ? "codigo" : "entrar");
-  const [name, setName] = useState("");
   const [email, setEmail] = useState(unverifiedEmail ?? "");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
@@ -86,19 +84,6 @@ export function LoginPage({
         go("codigo");
       }
     },
-    criar: async () => {
-      if (password.length < 8) throw new Error("A senha precisa ter pelo menos 8 caracteres.");
-      const data = await authCall<{ token?: string | null }>(
-        () =>
-          authClient.signUp.email({ email: address, password, name: name.trim() || address }) as Promise<
-            AuthResult<{ token?: string | null }>
-          >,
-      );
-      // sem sessão: o servidor exige a confirmação e já mandou o código
-      if (data?.token) await sendVerificationCode(address);
-      else noteCodeSent(address);
-      go("codigo");
-    },
     codigo: async () => {
       await authCall(() => authClient.emailOtp.verifyEmail({ email: address, otp: code.trim() }));
       clearToken();
@@ -106,7 +91,7 @@ export function LoginPage({
         onVerified?.();
         return;
       }
-      // conta recém-criada: entra direto com a senha que acabou de ser digitada
+      // entra direto com a senha que acabou de ser digitada
       if (password) {
         try {
           await authCall(() => signIn(address, password));
@@ -198,15 +183,9 @@ export function LoginPage({
 
           {note && <p className="rounded-md bg-success-soft px-3 py-2 text-[13px] text-emerald-800">{note}</p>}
 
-          {step === "criar" && (
-            <Field label="Seu nome" id="name">
-              <Input id="name" autoComplete="name" required autoFocus value={name} onChange={(e) => setName(e.target.value)} />
-            </Field>
-          )}
-          {(step === "entrar" || step === "criar" || step === "esqueci") && emailField}
+          {(step === "entrar" || step === "esqueci") && emailField}
           {(step === "codigo" || step === "nova-senha") && codeField}
           {step === "entrar" && passwordField("Senha", false)}
-          {step === "criar" && passwordField("Senha (mínimo de 8 caracteres)", true)}
           {step === "nova-senha" && passwordField("Nova senha (mínimo de 8 caracteres)", true)}
 
           {error && (
@@ -218,22 +197,14 @@ export function LoginPage({
           <Button type="submit" size="lg" disabled={busy}>
             {busy && <Loader2 className="animate-spin" />}
             {step === "entrar" && "Entrar"}
-            {step === "criar" && "Criar conta"}
             {step === "codigo" && "Confirmar e-mail"}
             {step === "esqueci" && "Enviar código"}
             {step === "nova-senha" && "Salvar nova senha"}
           </Button>
 
           <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 text-[13px]">
-            {step === "entrar" && (
-              <>
-                <LinkButton onClick={() => go("criar")}>Criar conta</LinkButton>
-                <LinkButton onClick={() => go("esqueci")}>Esqueci a senha</LinkButton>
-              </>
-            )}
-            {(step === "criar" || step === "esqueci") && (
-              <LinkButton onClick={() => go("entrar")}>Já tenho conta</LinkButton>
-            )}
+            {step === "entrar" && <LinkButton onClick={() => go("esqueci")}>Esqueci a senha</LinkButton>}
+            {step === "esqueci" && <LinkButton onClick={() => go("entrar")}>Voltar para o login</LinkButton>}
             {step === "codigo" && (
               <>
                 <LinkButton

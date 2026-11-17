@@ -74,6 +74,8 @@ export interface AccessList {
   /** todas as equipes que existem, para escolher as do coordenador */
   teams: string[];
   users: AccessUser[];
+  /** senha recém-criada para um e-mail: vem uma única vez, para o admin repassar */
+  password: { email: string; value: string } | null;
 }
 
 export interface DayData {
@@ -204,6 +206,8 @@ export const api = {
     request<{ default_active: string[] }>("/api/positions/default", { codes, team }),
   // só para administradores
   users: () => request<AccessList>("/api/users"),
-  saveUser: (email: string, role: Role, teams: string[]) => request<AccessList>("/api/users", { email, role, teams }),
+  saveUser: (user: { email: string; role: Role; teams: string[]; name?: string }) =>
+    request<AccessList>("/api/users", user),
+  newPassword: (email: string) => request<AccessList>("/api/users/password", { email }),
   removeUser: (email: string) => request<AccessList>("/api/users/remove", { email }),
 };

@@ -539,6 +539,12 @@ export async function upsertAppUser(sql: Sql, email: string, access: Access, by:
     ON CONFLICT (email) DO UPDATE SET role = excluded.role, teams = excluded.teams`;
 }
 
+/** Nome da conta de login desse e-mail; null se a pessoa ainda não tem conta. */
+export async function getAccountName(sql: Sql, email: string): Promise<{ name: string } | null> {
+  const rows = await sql`SELECT name FROM neon_auth."user" WHERE lower(email) = ${email} LIMIT 1`;
+  return rows.length ? { name: (rows[0].name as string) ?? "" } : null;
+}
+
 export async function removeAppUser(sql: Sql, email: string): Promise<void> {
   await sql`DELETE FROM app_users WHERE email = ${email}`;
 }

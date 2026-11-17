@@ -1,4 +1,5 @@
 /** Rotas da API (/api/*). Mesmo contrato do servidor local antigo (app/escala/server.py). */
+import { generatePassword, neonAccounts, type Accounts } from "./accounts.ts";
 import { authenticate, denied, HttpError, type AuthOptions, type AuthUser } from "./auth.ts";
 import {
   isLastSunday,
@@ -16,6 +17,12 @@ import type { Assignment, GenerationResult, Issue } from "./models.ts";
 type Body = Record<string, any>;
 type Query = Record<string, string>;
 type Sql = db.Sql;
+
+/** O que as rotas de acessos precisam além do banco: o endereço do site e as contas de login. */
+interface Context {
+  origin: string;
+  accounts: Accounts;
+}
 
 const UserError = db.UserError;
 
@@ -355,10 +362,14 @@ function requireAdmin(user: AuthUser): void {
   if (user.role !== "admin") throw denied("forbidden", "Só administradores podem gerenciar os acessos.");
 }
 
-async function usersPayload(sql: Sql, user: AuthUser) {
+/** `password`: senha recém-criada, mostrada uma única vez ao admin (o sistema não a guarda). */
+async function usersPayload(sql: Sql, user: AuthUser, password: { email: string; value: string } | null = null) {
   const [users, teams] = await Promise.all([db.listAppUsers(sql), db.getAvailableTeams(sql)]);
-  return { me: user.email, teams, users: users.map((u) => ({ ...u, created_at: localStamp(u.created_at) })) };
+  return { me: user.email, teams, password, users: users.map((u) => ({ ...u, created_at: localStamp(u.created_at) })) };
 }
+
+/** Nome para a conta de login: o informado ou, na falta, o começo do e-mail. */
+const accountName = (value: unknown, email: string) => db.cleanName(value).slice(0, 80) || email.split("@")[0];
 
 async function apiUsers(sql: Sql, _q: Query, user: AuthUser) {
   requireAdmin(user);
@@ -375,7 +386,7 @@ async function guardAdminChange(sql: Sql, user: AuthUser, email: string, next: d
   if ((await db.countAdmins(sql)) <= 1) throw new UserError("O sistema precisa de pelo menos um administrador.");
 }
 
-async function apiUserSave(sql: Sql, body: Body, user: AuthUser) {
+async function apiUserSave(sql: Sql, body: Body, user: AuthUser, ctx: Context) {
   requireAdmin(user);
   const email = db.cleanEmail(body.email);
   const role = db.cleanRole(body.role ?? "coordinator");
@@ -383,8 +394,29 @@ async function apiUserSave(sql: Sql, body: Body, user: AuthUser) {
   const teams = role === "admin" ? [] : db.cleanTeams(body.teams, await db.getAvailableTeams(sql));
   if (role === "coordinator" && !teams.length) throw new UserError("Escolha pelo menos uma equipe para o coordenador.");
   await guardAdminChange(sql, user, email, role);
+  // Quem ainda não tem conta de login ganha uma, com senha aleatória que o admin vê agora.
+  let password: string | null = null;
+  if (!(await db.getAccountName(sql, email))) {
+    const candidate = generatePassword();
+    const created = await ctx.accounts.create(sql, { email, name: accountName(body.name, email), password: candidate }, ctx.origin);
+    if (created) password = candidate;
+  }
   await db.upsertAppUser(sql, email, { role, teams }, user.email);
-  return usersPayload(sql, user);
+  return usersPayload(sql, user, password ? { email, value: password } : null);
+}
+
+/** Gera uma senha nova para alguém já liberado: a conta de login é recriada com ela. */
+async function apiUserPassword(sql: Sql, body: Body, user: AuthUser, ctx: Context) {
+  requireAdmin(user);
+  const email = db.cleanEmail(body.email);
+  if (email === user.email) throw new UserError('Para trocar a sua própria senha, use "Alterar senha" no menu.');
+  if (!(await db.getAccess(sql, email))) throw new UserError("Esse e-mail não está liberado.");
+  const current = await db.getAccountName(sql, email);
+  const password = generatePassword();
+  await ctx.accounts.remove(sql, email);
+  const created = await ctx.accounts.create(sql, { email, name: accountName(current?.name, email), password }, ctx.origin);
+  if (!created) throw new HttpError(502, "Não foi possível recriar a conta de login. Tente de novo.");
+  return usersPayload(sql, user, { email, value: password });
 }
 
 async function apiUserRemove(sql: Sql, body: Body, user: AuthUser) {
@@ -404,7 +436,7 @@ const GET_ROUTES: Record<string, (sql: Sql, q: Query, user: AuthUser) => Promise
   "/api/users": apiUsers,
 };
 
-const POST_ROUTES: Record<string, (sql: Sql, body: Body, user: AuthUser) => Promise<unknown>> = {
+const POST_ROUTES: Record<string, (sql: Sql, body: Body, user: AuthUser, ctx: Context) => Promise<unknown>> = {
   "/api/positions/default": apiPositionsDefault,
   "/api/generate": apiGenerate,
   "/api/validate": apiValidate,
@@ -412,6 +444,7 @@ const POST_ROUTES: Record<string, (sql: Sql, body: Body, user: AuthUser) => Prom
   "/api/volunteer": apiVolunteer,
   "/api/users": apiUserSave,
   "/api/users/remove": apiUserRemove,
+  "/api/users/password": apiUserPassword,
 };
 
 // ====================================================================== HTTP
@@ -425,6 +458,8 @@ function json(data: unknown, status = 200): Response {
 
 export interface HandleOptions extends AuthOptions {
   sql?: Sql;
+  /** Só para testes: troca a criação de contas no Neon Auth. */
+  accounts?: Accounts;
 }
 
 export async function handle(request: Request, opts: HandleOptions = {}): Promise<Response> {
@@ -450,7 +485,8 @@ export async function handle(request: Request, opts: HandleOptions = {}): Promis
       return json({ error: "JSON inválido" }, 400);
     }
     if (typeof body !== "object" || body === null || Array.isArray(body)) return json({ error: "JSON inválido" }, 400);
-    return json(await post!(sql, body as Body, user));
+    const ctx: Context = { origin: url.origin, accounts: opts.accounts ?? neonAccounts };
+    return json(await post!(sql, body as Body, user, ctx));
   } catch (e) {
     if (e instanceof HttpError) return json({ error: e.message, code: e.code }, e.status);
     if (e instanceof UserError) return json({ error: e.message }, 400);

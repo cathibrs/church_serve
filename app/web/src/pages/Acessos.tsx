@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
-import { ChevronDown, Loader2, Pencil, Trash2, UserPlus, Users, X } from "lucide-react";
+import { Check, ChevronDown, Copy, KeyRound, Loader2, Pencil, Trash2, UserPlus, Users, X } from "lucide-react";
 import { api, type AccessList, type AccessUser, type Role } from "@/lib/api";
 import { teamLabel } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Confirm } from "@/components/ui/alert-dialog";
+import { Dialog } from "@/components/ui/dialog";
 import { Tooltip } from "@/components/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
@@ -21,13 +22,14 @@ const ROLE_LABEL: Record<Role, string> = { admin: "Administrador", coordinator: 
 
 interface Draft {
   email: string;
+  name: string;
   role: Role;
   teams: string[];
   /** true = alterando um acesso que já existe (o e-mail não muda) */
   editing: boolean;
 }
 
-const EMPTY: Draft = { email: "", role: "coordinator", teams: [], editing: false };
+const EMPTY: Draft = { email: "", name: "", role: "coordinator", teams: [], editing: false };
 
 function AccountStatus({ user }: { user: AccessUser }) {
   if (!user.has_account) return <Badge variant="outline">Ainda não criou a conta</Badge>;
@@ -72,6 +74,9 @@ export function AcessosPage() {
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [busy, setBusy] = useState(false);
   const [removing, setRemoving] = useState<AccessUser | null>(null);
+  const [resetting, setResetting] = useState<AccessUser | null>(null);
+  /** senha recém-criada, mostrada uma única vez */
+  const [shown, setShown] = useState<AccessList["password"]>(null);
 
   useEffect(() => {
     api.users().then(setList).catch((e) => toast.error(e.message));
@@ -80,8 +85,10 @@ export function AcessosPage() {
   async function run(action: () => Promise<AccessList>, done: string): Promise<boolean> {
     setBusy(true);
     try {
-      setList(await action());
-      toast.success(done);
+      const next = await action();
+      setList(next);
+      if (next.password) setShown(next.password);
+      else toast.success(done);
       return true;
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
@@ -101,7 +108,8 @@ export function AcessosPage() {
     }
     const address = draft.email.trim().toLowerCase();
     const done = draft.editing ? `Acesso de ${address} atualizado.` : `${address} liberado.`;
-    if (await run(() => api.saveUser(address, draft.role, draft.teams), done)) setDraft(EMPTY);
+    const user = { email: address, role: draft.role, teams: draft.teams, name: draft.name.trim() || undefined };
+    if (await run(() => api.saveUser(user), done)) setDraft(EMPTY);
   };
 
   const admins = list?.users.filter((u) => u.role === "admin").length ?? 0;
@@ -126,8 +134,18 @@ export function AcessosPage() {
           onChange={(e) => setDraft({ ...draft, email: e.target.value })}
           placeholder="E-mail a liberar"
           aria-label="E-mail a liberar"
-          className="w-72"
+          className="w-64"
         />
+        {!draft.editing && (
+          <Input
+            value={draft.name}
+            onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+            placeholder="Nome (opcional)"
+            aria-label="Nome"
+            maxLength={80}
+            className="w-48"
+          />
+        )}
         <Select value={draft.role} onValueChange={(v) => setDraft({ ...draft, role: v as Role })}>
           <SelectTrigger className="w-[170px]" aria-label="Papel">
             <SelectValue />
@@ -152,7 +170,7 @@ export function AcessosPage() {
         <p className="basis-full text-xs text-muted-foreground">
           {draft.editing
             ? `Alterando o acesso de ${draft.email}.`
-            : "A pessoa cria a própria conta no site com esse e-mail e confirma pelo código recebido."}{" "}
+            : "O sistema cria a conta com uma senha aleatória e mostra a senha para você repassar. A pessoa pode trocá-la depois, se quiser."}{" "}
           Coordenador vê e altera só as equipes escolhidas; administrador vê todas e gerencia esta lista.
         </p>
       </form>
@@ -168,7 +186,7 @@ export function AcessosPage() {
                 <th className="px-2">Papel</th>
                 <th className="px-2">Equipes</th>
                 <th className="px-2">Liberado em</th>
-                <th className="w-24" />
+                <th className="w-32" />
               </tr>
             </thead>
             <tbody>
@@ -223,9 +241,22 @@ export function AcessosPage() {
                               size="icon-sm"
                               aria-label={`Alterar acesso de ${u.email}`}
                               disabled={busy}
-                              onClick={() => setDraft({ email: u.email, role: u.role, teams: u.teams, editing: true })}
+                              onClick={() =>
+                                setDraft({ email: u.email, name: u.name ?? "", role: u.role, teams: u.teams, editing: true })
+                              }
                             >
                               <Pencil />
+                            </Button>
+                          </Tooltip>
+                          <Tooltip content="Gerar nova senha">
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              aria-label={`Gerar nova senha para ${u.email}`}
+                              disabled={busy}
+                              onClick={() => setResetting(u)}
+                            >
+                              <KeyRound />
                             </Button>
                           </Tooltip>
                           <Tooltip content="Remover acesso">
@@ -269,6 +300,76 @@ export function AcessosPage() {
           run(() => api.removeUser(target.email), `Acesso de ${target.email} removido.`);
         }}
       />
+
+      <Confirm
+        open={!!resetting}
+        onOpenChange={(open) => !open && setResetting(null)}
+        title="Gerar nova senha?"
+        description={
+          <>
+            A senha atual de <b>{resetting?.email}</b> deixa de funcionar e a pessoa é desconectada. A nova senha
+            aparece em seguida, para você repassar.
+          </>
+        }
+        confirmLabel="Gerar nova senha"
+        onConfirm={() => {
+          const target = resetting!;
+          setResetting(null);
+          run(() => api.newPassword(target.email), `Nova senha gerada para ${target.email}.`);
+        }}
+      />
+
+      <PasswordDialog password={shown} onClose={() => setShown(null)} />
     </div>
+  );
+}
+
+/** Mostra a senha recém-criada. Ela não fica guardada: fechou, não aparece de novo. */
+function PasswordDialog({ password, onClose }: { password: AccessList["password"]; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => setCopied(false), [password]);
+
+  const copy = async () => {
+    if (!password) return;
+    try {
+      await navigator.clipboard.writeText(password.value);
+      setCopied(true);
+    } catch {
+      toast.error("Não foi possível copiar. Selecione a senha e copie manualmente.");
+    }
+  };
+
+  return (
+    <Dialog
+      open={!!password}
+      onOpenChange={(open) => !open && onClose()}
+      title="Senha de acesso"
+      description={
+        <>
+          Repasse esta senha para <b>{password?.email}</b>. Ela aparece só agora: o sistema não guarda a senha.
+        </>
+      }
+    >
+      <div className="flex items-center gap-2">
+        <code
+          data-testid="senha-gerada"
+          className="flex-1 rounded-md border bg-muted px-3 py-2 text-center font-mono text-lg tracking-wider select-all"
+        >
+          {password?.value}
+        </code>
+        <Button type="button" variant="outline" onClick={copy}>
+          {copied ? <Check /> : <Copy />} {copied ? "Copiada" : "Copiar"}
+        </Button>
+      </div>
+      <p className="mt-3 text-xs text-muted-foreground">
+        A pessoa entra com o e-mail e esta senha. Se quiser, troca depois em "Alterar senha", no menu. Se a senha se
+        perder, use "Gerar nova senha" na linha dela.
+      </p>
+      <div className="mt-4 flex justify-end">
+        <Button type="button" onClick={onClose}>
+          Já anotei
+        </Button>
+      </div>
+    </Dialog>
   );
 }

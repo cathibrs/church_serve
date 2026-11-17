@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { CalendarRange, History, KeyRound, LogOut, PanelLeftClose, PanelLeftOpen, Users } from "lucide-react";
+import { CalendarRange, History, KeyRound, Lock, LogOut, PanelLeftClose, PanelLeftOpen, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tooltip } from "./ui/tooltip";
 
@@ -20,6 +20,7 @@ export function AppSidebar({
   page,
   onPage,
   onSignOut,
+  onChangePassword,
   userEmail,
   isAdmin,
   collapsed,
@@ -28,6 +29,7 @@ export function AppSidebar({
   page: Page;
   onPage: (p: Page) => void;
   onSignOut: () => void;
+  onChangePassword: () => void;
   userEmail: string;
   isAdmin: boolean;
   collapsed: boolean;
@@ -139,6 +141,7 @@ export function AppSidebar({
           hint="Ctrl+B"
           onClick={onToggle}
         />
+        <SideAction collapsed={collapsed} icon={Lock} label="Alterar senha" onClick={onChangePassword} />
         <SideAction collapsed={collapsed} icon={LogOut} label="Sair" onClick={onSignOut} />
         {!collapsed && (
           <div className="mt-1 px-3 text-[11px] text-white/45">

@@ -4,11 +4,13 @@
  *   npm run admin -- pessoa@exemplo.com
  *
  * Use para o primeiro acesso (antes de existir algum admin) e para recuperar o acesso
- * se ninguém mais conseguir entrar na tela Acessos. A conexão vem de DATABASE_URL
+ * se ninguém mais conseguir entrar na tela Acessos. Se o e-mail ainda não tiver conta de
+ * login, cria uma e mostra a senha aleatória. A conexão vem de DATABASE_URL
  * (arquivo .env.local ou .env desta pasta). Também cria a tabela de acessos, se faltar.
  */
 import { existsSync, readFileSync } from "node:fs";
-import { cleanEmail, countAdmins, upsertAppUser, type Sql } from "../server/db.ts";
+import { generatePassword, neonAccounts } from "../server/accounts.ts";
+import { cleanEmail, countAdmins, getAccountName, upsertAppUser, type Sql } from "../server/db.ts";
 import { applySchema } from "../server/importer.ts";
 
 async function main() {
@@ -23,6 +25,18 @@ async function main() {
   await applySchema(sql, readFileSync(new URL("../db/schema.sql", import.meta.url), "utf-8"));
   await upsertAppUser(sql, email, { role: "admin", teams: [] }, "npm run admin");
   console.log(`${email} agora é administrador (${await countAdmins(sql)} administrador(es) no total).`);
+
+  // Sem conta de login ainda: cria uma, com senha aleatória mostrada só agora.
+  if (!(await getAccountName(sql, email))) {
+    const password = generatePassword();
+    // localhost é uma origem que o Neon Auth aceita por padrão
+    if (await neonAccounts.create(sql, { email, name: email.split("@")[0], password }, "http://localhost:8888")) {
+      console.log(`\nConta de login criada. Senha (anote, ela não aparece de novo): ${password}`);
+      console.log('A pessoa pode trocar depois em "Alterar senha".');
+    }
+  } else {
+    console.log("A conta de login desse e-mail já existia; a senha não foi alterada.");
+  }
 }
 
 main().catch((e) => {

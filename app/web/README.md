@@ -84,24 +84,38 @@ Quem pode entrar fica na tabela `app_users` do banco, com um papel:
 - **Administrador**: vê todas as equipes e libera e remove e-mails na tela **Acessos**.
 
 O primeiro administrador é criado pelo terminal (o mesmo comando serve para recuperar o acesso se
-ninguém mais conseguir entrar na tela Acessos):
+ninguém mais conseguir entrar na tela Acessos). Se o e-mail ainda não tiver conta de login, o
+comando cria uma e mostra a senha:
 
 ```bash
 npm run admin -- pessoa@exemplo.com
 ```
 
-Daí em diante é tudo pelo site: o administrador libera o e-mail na tela Acessos (para coordenador,
-escolhendo as equipes dele), e a pessoa abre o site, clica em **Criar conta** com esse e-mail e
-confirma com o código recebido. Quem criar conta
-com um e-mail não liberado cai na tela "Sem acesso" e não vê nenhum dado. Remover um e-mail da
-lista bloqueia a pessoa na hora; não é preciso publicar o site de novo.
+Daí em diante é tudo pelo site, na tela Acessos:
+
+- **Liberar um e-mail** (para coordenador, escolhendo as equipes dele) cria a conta de login da
+  pessoa com uma **senha aleatória**, mostrada uma única vez ao administrador, que a repassa. A
+  conta já nasce com o e-mail confirmado: a pessoa entra direto, sem cadastro e sem código. O
+  sistema não guarda a senha.
+- **A pessoa troca a senha se quiser**, em "Alterar senha" no menu. Não é obrigatório.
+- **Gerar nova senha** (ícone de chave na linha) serve para quando a senha se perde: a anterior
+  deixa de valer, a pessoa é desconectada e a nova aparece para o administrador.
+- **Remover** um e-mail bloqueia a pessoa na hora; não é preciso publicar o site de novo.
+
+A tela de login não tem "criar conta". O serviço de login do Neon ainda aceita cadastros feitos
+direto no endereço dele, mas uma conta assim não entra no sistema: a API só atende e-mails
+liberados na tela Acessos.
+
+Como a conta é criada ([`server/accounts.ts`](server/accounts.ts)): a API chama o cadastro do Neon
+Auth com a senha sorteada, marca o e-mail como confirmado e apaga a sessão aberta pelo cadastro.
+"Gerar nova senha" apaga a conta de login e a recria; papel e equipes ficam como estavam.
 
 O site só baixa e mostra o sistema depois que a API valida a sessão e o acesso: quem não está
 logado, ou não foi liberado, recebe apenas a tela de login.
 
-Os e-mails de código saem pelo remetente compartilhado do Neon (`auth@mail.myneon.app`) e podem
-cair no spam. Para uso contínuo, o Neon recomenda configurar um SMTP próprio
-(<https://neon.com/docs/auth/production-checklist>).
+"Esqueci a senha" manda um código por e-mail, pelo remetente compartilhado do Neon
+(`auth@mail.myneon.app`), e pode cair no spam. Para uso contínuo, o Neon recomenda configurar um
+SMTP próprio (<https://neon.com/docs/auth/production-checklist>).
 
 ## Desenvolver
 

@@ -5,7 +5,7 @@ O sistema é um site: funciona no navegador do computador ou do celular, sem ins
 ## Para usar
 
 1. Abra o endereço do site informado pela liderança.
-2. Na primeira vez, clique em **Criar conta** e confirme seu e-mail com o código recebido.
+2. Entre com o seu e-mail e a senha que o administrador lhe passou (dá para trocar depois, em **Alterar senha**).
 3. Escolha a data, marque quem faltou e clique em **Gerar escala**.
 
 Para trocar alguém, clique no nome. Tudo é salvo sozinho. Mais detalhes em `LEIA-ME.txt`.

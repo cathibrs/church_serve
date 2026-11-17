@@ -1,5 +1,6 @@
 /** API de ponta a ponta sobre um Postgres embutido: login, escala, voluntários e importação. */
 import { beforeAll, describe, expect, it } from "vitest";
+import type { Accounts } from "./accounts.ts";
 import type { Sql } from "./db.ts";
 import { applyImport, buildImport, parseBaseSheet, type SourceData } from "./importer.ts";
 import { handle, type HandleOptions } from "./routes.ts";
@@ -32,9 +33,25 @@ const TEAM = "Domingo_Manha_A";
 const DATE = "2026-12-06"; // domingo comum
 const NEXT = "2026-12-13";
 
+/** Contas de login de mentira: gravam na tabela neon_auth."user" do banco de teste. */
+const createdPasswords = new Map<string, string>();
+const accounts: Accounts = {
+  async create(db, { email, name, password }) {
+    if ((await db`SELECT 1 FROM neon_auth."user" WHERE lower(email) = ${email}`).length) return false;
+    await db`INSERT INTO neon_auth."user" (name, email, "emailVerified") VALUES (${name}, ${email}, true)`;
+    createdPasswords.set(email, password);
+    return true;
+  },
+  async remove(db, email) {
+    await db`DELETE FROM neon_auth."user" WHERE lower(email) = ${email}`;
+    createdPasswords.delete(email);
+  },
+};
+const PASSWORD = /^[a-hjkmnp-z2-9]{4}-[a-hjkmnp-z2-9]{4}-[a-hjkmnp-z2-9]{4}$/;
+
 beforeAll(async () => {
   sql = (await createTestDb()).sql;
-  opts = { sql, verify };
+  opts = { sql, verify, accounts };
   await sql`INSERT INTO app_users (email, role) VALUES (${LEADER}, 'admin')`;
   for (let i = 1; i <= 36; i++) {
     const r = await call("/api/volunteer", {
@@ -114,18 +131,54 @@ describe("acessos: admin e coordenador", () => {
     expect((await call("/api/users", { email: COORD, role: "coordinator", teams: ["Equipe Inventada"] })).status).toBe(400);
     expect((await call("/api/users", { email: COORD, role: "member", teams: [TEAM] })).status).toBe(400);
 
-    const r = await call("/api/users", { email: `  ${COORD.toUpperCase()} `, role: "coordinator", teams: [WED, TEAM, TEAM] });
+    // as tentativas recusadas não criaram conta de login
+    expect(createdPasswords.size).toBe(0);
+
+    const r = await call("/api/users", {
+      email: `  ${COORD.toUpperCase()} `,
+      name: "  Fulana   de Tal ",
+      role: "coordinator",
+      teams: [WED, TEAM, TEAM],
+    });
     expect(r.status).toBe(200);
     expect(summary(r.data)).toEqual([`${LEADER}:admin:`, `${COORD}:coordinator:${TEAM}+${WED}`]);
-    expect(r.data.users[1]).toMatchObject({ created_by: LEADER, has_account: false, verified: false });
     expect(r.data.teams).toContain(OTHER);
+    // a conta de login é criada junto, já confirmada, e a senha aleatória volta para o admin
+    expect(r.data.users[1]).toMatchObject({ created_by: LEADER, name: "Fulana de Tal", has_account: true, verified: true });
+    expect(r.data.password.email).toBe(COORD);
+    expect(r.data.password.value).toMatch(PASSWORD);
+    expect(createdPasswords.get(COORD)).toBe(r.data.password.value);
   });
 
-  it("a lista mostra quem já criou conta e confirmou o e-mail", async () => {
-    await sql`INSERT INTO neon_auth."user" (name, email, "emailVerified") VALUES ('Fulana', 'Coordenador@Igreja.org', true)`;
-    const { data } = await call("/api/users");
-    expect(data.me).toBe(LEADER);
-    expect(data.users[1]).toMatchObject({ email: COORD, name: "Fulana", has_account: true, verified: true });
+  it("a senha só é mostrada na criação; mudar papel ou equipes não gera outra", async () => {
+    const first = createdPasswords.get(COORD);
+    const edit = await call("/api/users", { email: COORD, role: "coordinator", teams: [TEAM, WED] });
+    expect(edit.status).toBe(200);
+    expect(edit.data.password).toBeNull();
+    expect((await call("/api/users")).data.password).toBeNull();
+    expect(createdPasswords.get(COORD)).toBe(first);
+  });
+
+  it("admin gera uma senha nova para quem já está liberado", async () => {
+    const first = createdPasswords.get(COORD);
+    const r = await call("/api/users/password", { email: COORD });
+    expect(r.status).toBe(200);
+    expect(r.data.password.email).toBe(COORD);
+    expect(r.data.password.value).toMatch(PASSWORD);
+    expect(r.data.password.value).not.toBe(first);
+    expect(createdPasswords.get(COORD)).toBe(r.data.password.value);
+    // a conta continua existindo, com o mesmo nome, e o acesso não mudou
+    expect(r.data.users[1]).toMatchObject({ email: COORD, name: "Fulana de Tal", has_account: true, role: "coordinator" });
+    // não vale para si mesmo nem para quem não está liberado
+    expect((await call("/api/users/password", { email: LEADER })).status).toBe(400);
+    expect((await call("/api/users/password", { email: "estranho@gmail.com" })).status).toBe(400);
+  });
+
+  it("as senhas geradas não se repetem", async () => {
+    const { generatePassword } = await import("./accounts.ts");
+    const many = new Set(Array.from({ length: 500 }, generatePassword));
+    expect(many.size).toBe(500);
+    for (const p of many) expect(p).toMatch(PASSWORD);
   });
 
   it("coordenador só recebe as equipes dele", async () => {
@@ -208,6 +261,7 @@ describe("acessos: admin e coordenador", () => {
       await call("/api/users", undefined, COORD),
       await call("/api/users", { email: "amigo@gmail.com", role: "admin" }, COORD),
       await call("/api/users/remove", { email: LEADER }, COORD),
+      await call("/api/users/password", { email: LEADER }, COORD),
     ]) {
       expect(forbidden(r)).toBe(true);
       expect(r.data.users).toBeUndefined();
