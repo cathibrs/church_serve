@@ -34,7 +34,8 @@ const NEXT = "2026-12-13";
 
 beforeAll(async () => {
   sql = (await createTestDb()).sql;
-  opts = { sql, verify, allowed: new Set([LEADER]) };
+  opts = { sql, verify };
+  await sql`INSERT INTO app_users (email, role) VALUES (${LEADER}, 'admin')`;
   for (let i = 1; i <= 36; i++) {
     const r = await call("/api/volunteer", {
       name: `Pessoa ${String(i).padStart(2, "0")}`,
@@ -88,6 +89,70 @@ describe("acesso", () => {
 
   it("rota que não existe: 404", async () => {
     expect((await call("/api/quit", {})).status).toBe(404);
+  });
+});
+
+describe("acessos e papel de admin", () => {
+  const MEMBER = "membro@igreja.org";
+  const emails = (data: any) => data.users.map((u: any) => `${u.email}:${u.role}`);
+
+  it("init informa quem está logado e o papel", async () => {
+    expect((await call("/api/init")).data.user).toEqual({ email: LEADER, role: "admin" });
+  });
+
+  it("admin libera um e-mail e a pessoa passa a entrar como membro", async () => {
+    expect((await call("/api/init", undefined, MEMBER)).data.code).toBe("forbidden");
+    const r = await call("/api/users", { email: `  ${MEMBER.toUpperCase()} ` });
+    expect(r.status).toBe(200);
+    expect(emails(r.data)).toEqual([`${LEADER}:admin`, `${MEMBER}:member`]);
+    expect(r.data.users[1]).toMatchObject({ created_by: LEADER, has_account: false, verified: false });
+    expect((await call("/api/init", undefined, MEMBER)).data.user).toEqual({ email: MEMBER, role: "member" });
+  });
+
+  it("a lista mostra quem já criou conta e confirmou o e-mail", async () => {
+    await sql`INSERT INTO neon_auth."user" (name, email, "emailVerified") VALUES ('Fulana', 'Membro@Igreja.org', true)`;
+    const { data } = await call("/api/users");
+    expect(data.me).toBe(LEADER);
+    expect(data.users[1]).toMatchObject({ email: MEMBER, name: "Fulana", has_account: true, verified: true });
+  });
+
+  it("membro usa a escala, mas não vê nem altera os acessos", async () => {
+    expect((await call("/api/volunteers", undefined, MEMBER)).status).toBe(200);
+    for (const r of [
+      await call("/api/users", undefined, MEMBER),
+      await call("/api/users", { email: "amigo@gmail.com", role: "admin" }, MEMBER),
+      await call("/api/users/remove", { email: LEADER }, MEMBER),
+    ]) {
+      expect(r.status).toBe(401);
+      expect(r.data.code).toBe("forbidden");
+      expect(r.data.users).toBeUndefined();
+    }
+    expect(emails((await call("/api/users")).data)).toEqual([`${LEADER}:admin`, `${MEMBER}:member`]);
+  });
+
+  it("o último admin não pode ser rebaixado nem removido, nem tirar o próprio acesso", async () => {
+    const demote = await call("/api/users", { email: LEADER, role: "member" });
+    expect(demote.status).toBe(400);
+    expect((await call("/api/users/remove", { email: LEADER })).status).toBe(400);
+
+    await call("/api/users", { email: MEMBER, role: "admin" });
+    // com dois admins: um rebaixa o outro, mas ninguém rebaixa a si mesmo
+    expect((await call("/api/users", { email: LEADER, role: "member" })).status).toBe(400);
+    expect((await call("/api/users", { email: LEADER, role: "member" }, MEMBER)).status).toBe(200);
+    expect((await call("/api/users", { email: MEMBER, role: "member" }, MEMBER)).status).toBe(400);
+    expect((await call("/api/users", { email: LEADER, role: "admin" }, MEMBER)).status).toBe(200);
+    expect((await call("/api/users", { email: MEMBER, role: "member" })).status).toBe(200);
+  });
+
+  it("remover o acesso bloqueia a pessoa na hora", async () => {
+    const r = await call("/api/users/remove", { email: MEMBER });
+    expect(emails(r.data)).toEqual([`${LEADER}:admin`]);
+    expect((await call("/api/volunteers", undefined, MEMBER)).data.code).toBe("forbidden");
+  });
+
+  it("e-mail ou papel inválido: 400", async () => {
+    expect((await call("/api/users", { email: "sem-arroba" })).status).toBe(400);
+    expect((await call("/api/users", { email: "a@b.co", role: "dono" })).status).toBe(400);
   });
 });
 

@@ -8,7 +8,8 @@
     "build": "npm --prefix app/web run build",
     "test": "npm --prefix app/web run test",
     "typecheck": "npm --prefix app/web run typecheck",
-    "import": "npm --prefix app/web run import --"
+    "import": "npm --prefix app/web run import --",
+    "admin": "npm --prefix app/web run admin --"
   },
   "dependencies": {
     "@neon/config": "^1.14.1",

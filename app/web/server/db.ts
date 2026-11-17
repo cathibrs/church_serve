@@ -465,3 +465,62 @@ export async function getHistoryMatrix(sql: Sql, team: string | null = null): Pr
   }
   return [...rows.values()]; // já na ordem de getVolunteers (por nome)
 }
+
+// ---------------------------------------------------------------- acessos (app_users)
+
+export type Role = "admin" | "member";
+
+export interface AppUser {
+  email: string;
+  role: Role;
+  created_at: Date;
+  created_by: string | null;
+  /** nome informado ao criar a conta no login (null se ainda não criou) */
+  name: string | null;
+  has_account: boolean;
+  verified: boolean;
+}
+
+/** E-mail em minúsculas e sem espaços; erro se não parecer um e-mail. */
+export function cleanEmail(value: unknown): string {
+  const email = String(value ?? "").trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) throw new UserError("E-mail inválido.");
+  return email;
+}
+
+export function cleanRole(value: unknown): Role {
+  if (value === "admin" || value === "member") return value;
+  throw new UserError("Papel inválido.");
+}
+
+/** Papel de quem tem acesso, ou null se o e-mail não está liberado. */
+export async function getAppUserRole(sql: Sql, email: string): Promise<Role | null> {
+  const rows = await sql`SELECT role FROM app_users WHERE email = ${email.trim().toLowerCase()}`;
+  return (rows[0]?.role as Role | undefined) ?? null;
+}
+
+/** Lista de acessos, com a situação da conta de cada e-mail no login. */
+export async function listAppUsers(sql: Sql): Promise<AppUser[]> {
+  const rows = await sql`
+    SELECT a.email, a.role, a.created_at, a.created_by, u.name,
+           (u.email IS NOT NULL) AS has_account, COALESCE(u."emailVerified", false) AS verified
+    FROM app_users a
+    LEFT JOIN neon_auth."user" u ON lower(u.email) = a.email
+    ORDER BY (a.role = 'admin') DESC, a.email`;
+  return rows as unknown as AppUser[];
+}
+
+/** Libera um e-mail ou muda o papel de quem já está liberado. */
+export async function upsertAppUser(sql: Sql, email: string, role: Role, by: string | null): Promise<void> {
+  await sql`
+    INSERT INTO app_users (email, role, created_by) VALUES (${email}, ${role}, ${by})
+    ON CONFLICT (email) DO UPDATE SET role = excluded.role`;
+}
+
+export async function removeAppUser(sql: Sql, email: string): Promise<void> {
+  await sql`DELETE FROM app_users WHERE email = ${email}`;
+}
+
+export async function countAdmins(sql: Sql): Promise<number> {
+  return (await sql`SELECT COUNT(*)::int AS n FROM app_users WHERE role = 'admin'`)[0].n;
+}

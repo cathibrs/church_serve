@@ -35,6 +35,10 @@ export async function createTestDb(opts: { schema?: boolean } = {}): Promise<{ s
       for (const q of queries as LazyQuery[]) out.push((await tx.query<Row>(q.text, q.params)).rows);
       return out;
     });
+  // Nos testes não há Neon Auth: uma tabela vazia no mesmo formato basta para as consultas.
+  await pg.exec(`CREATE SCHEMA neon_auth;
+    CREATE TABLE neon_auth."user" (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name text, email text,
+                                   "emailVerified" boolean NOT NULL DEFAULT false)`);
   if (opts.schema ?? true) await applySchema(sql, SCHEMA);
   return { sql, pg };
 }

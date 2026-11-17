@@ -31,14 +31,23 @@ const TITLES: Record<Step, [string, string]> = {
  * Telas de acesso. `unverifiedEmail`: há sessão aberta, mas o e-mail ainda não foi
  * confirmado (nesse caso a tela já abre pedindo o código).
  */
-export function LoginPage({ unverifiedEmail, onVerified }: { unverifiedEmail?: string; onVerified?: () => void }) {
+export function LoginPage({
+  unverifiedEmail,
+  onVerified,
+  notice,
+}: {
+  unverifiedEmail?: string;
+  onVerified?: () => void;
+  /** aviso inicial (ex.: a API recusou a sessão anterior) */
+  notice?: string;
+}) {
   const [step, setStep] = useState<Step>(unverifiedEmail ? "codigo" : "entrar");
   const [name, setName] = useState("");
   const [email, setEmail] = useState(unverifiedEmail ?? "");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(notice ?? "");
   const [note, setNote] = useState("");
 
   const go = (next: Step, message = "") => {

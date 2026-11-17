@@ -3,13 +3,13 @@
  *
  * O navegador manda `Authorization: Bearer <JWT>`. Aqui o token é conferido com as
  * chaves públicas do Neon Auth e o acesso só é liberado se o e-mail da conta estiver
- * verificado e constar em ALLOWED_EMAILS.
+ * verificado e constar na tabela app_users (que também diz se a pessoa é admin).
  *
  * A liberação é feita aqui, e não na tela, porque o endereço do Neon Auth aceita
  * cadastros de qualquer pessoa: criar uma conta não dá acesso aos dados.
  */
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
-import type { Sql } from "./db.ts";
+import { getAppUserRole, type Role, type Sql } from "./db.ts";
 
 export class HttpError extends Error {
   readonly status: number;
@@ -26,16 +26,17 @@ export class HttpError extends Error {
  * Toda recusa de acesso responde 401, com o motivo no campo `code`:
  *   unauthenticated  sem token ou token vencido (o navegador tenta renovar e pede login)
  *   unverified       conta com e-mail ainda não confirmado
- *   forbidden        e-mail fora de ALLOWED_EMAILS
+ *   forbidden        e-mail sem acesso liberado (ou ação só de admin)
  * Não se usa 403: no `netlify dev`, uma resposta 403 ou 404 faz o emulador repetir o pedido
  * em caminhos alternativos (/api/x.html) e a mensagem original se perde.
  */
-const denied = (code: "unauthenticated" | "unverified" | "forbidden", message: string) =>
+export const denied = (code: "unauthenticated" | "unverified" | "forbidden", message: string) =>
   new HttpError(401, message, code);
 
 export interface AuthUser {
   id: string;
   email: string;
+  role: Role;
 }
 
 type Verifier = (token: string) => Promise<JWTPayload>;
@@ -44,20 +45,14 @@ let verifier: Verifier | null = null;
 
 function defaultVerifier(): Verifier {
   if (verifier) return verifier;
-  const jwksUrl = process.env.NEON_AUTH_JWKS_URL;
-  const baseUrl = process.env.NEON_AUTH_BASE_URL;
-  if (!jwksUrl || !baseUrl) {
-    throw new HttpError(500, "Login não configurado: faltam NEON_AUTH_JWKS_URL e NEON_AUTH_BASE_URL.");
-  }
+  const baseUrl = process.env.NEON_AUTH_BASE_URL?.trim().replace(/\/+$/, "");
+  if (!baseUrl) throw new HttpError(500, "Login não configurado: falta a variável NEON_AUTH_BASE_URL.");
+  // As chaves públicas ficam em um endereço fixo a partir do endereço do login.
+  const jwksUrl = process.env.NEON_AUTH_JWKS_URL?.trim() || `${baseUrl}/.well-known/jwks.json`;
   const jwks = createRemoteJWKSet(new URL(jwksUrl));
   const issuer = new URL(baseUrl).origin;
   verifier = async (token) => (await jwtVerify(token, jwks, { issuer })).payload;
   return verifier;
-}
-
-/** E-mails com acesso (ALLOWED_EMAILS, separados por vírgula, espaço ou quebra de linha). */
-export function allowedEmails(raw: string | undefined = process.env.ALLOWED_EMAILS): Set<string> {
-  return new Set((raw ?? "").split(/[\s,;]+/).map((e) => e.trim().toLowerCase()).filter(Boolean));
 }
 
 interface Account {
@@ -84,7 +79,6 @@ async function accountFromDb(sql: Sql, userId: string): Promise<Account | null> 
 export interface AuthOptions {
   /** Só para testes: troca a conferência do token. */
   verify?: Verifier;
-  allowed?: Set<string>;
 }
 
 export async function authenticate(request: Request, sql: Sql, opts: AuthOptions = {}): Promise<AuthUser> {
@@ -108,9 +102,9 @@ export async function authenticate(request: Request, sql: Sql, opts: AuthOptions
 
   const email = account.email.trim().toLowerCase();
   if (!account.verified) throw denied("unverified", "Confirme seu e-mail para entrar.");
-  const allowed = opts.allowed ?? allowedEmails();
-  if (!allowed.has(email)) {
-    throw denied("forbidden", `O e-mail ${email} não tem acesso à escala. Peça a liberação à liderança.`);
+  const role = await getAppUserRole(sql, email);
+  if (!role) {
+    throw denied("forbidden", `O e-mail ${email} não tem acesso à escala. Peça a liberação a um administrador.`);
   }
-  return { id: payload.sub, email };
+  return { id: payload.sub, email, role };
 }

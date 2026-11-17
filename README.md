@@ -29,8 +29,9 @@ As regras completas da escala estão em [`LEIA-ME.txt`](LEIA-ME.txt).
 | Login | Neon Auth | [`app/web/server/auth.ts`](app/web/server/auth.ts) |
 | Carga inicial dos dados | script Node | [`app/web/scripts/import.ts`](app/web/scripts/import.ts) |
 
-Só acessa a escala quem tem conta com e-mail confirmado **e** está na lista `ALLOWED_EMAILS`.
-Criar uma conta com outro e-mail não dá acesso a nenhum dado.
+Só acessa a escala quem tem conta com e-mail confirmado **e** foi liberado por um administrador
+(tela Acessos). Criar uma conta com outro e-mail não dá acesso a nenhum dado, e o site só baixa e
+mostra o sistema depois que a API valida a sessão.
 
 ## Rodar no seu computador
 

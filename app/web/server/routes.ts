@@ -1,5 +1,5 @@
 /** Rotas da API (/api/*). Mesmo contrato do servidor local antigo (app/escala/server.py). */
-import { authenticate, HttpError, type AuthOptions } from "./auth.ts";
+import { authenticate, denied, HttpError, type AuthOptions, type AuthUser } from "./auth.ts";
 import {
   isLastSunday,
   isoDate,
@@ -140,14 +140,21 @@ async function generate(
 
 // ====================================================================== API
 
-async function apiInit(sql: Sql) {
+async function apiInit(sql: Sql, _q: Query, user: AuthUser) {
   const today = localNow().date;
   const [teams, team, active] = await Promise.all([
     db.getAvailableTeams(sql),
     suggestTeam(sql, today),
     defaultActive(sql),
   ]);
-  return { today, teams, team, positions: db.getPositions(), default_active: active };
+  return {
+    today,
+    teams,
+    team,
+    positions: db.getPositions(),
+    default_active: active,
+    user: { email: user.email, role: user.role },
+  };
 }
 
 async function apiDay(sql: Sql, q: Query) {
@@ -278,19 +285,66 @@ async function apiHistory(sql: Sql, q: Query) {
   };
 }
 
-const GET_ROUTES: Record<string, (sql: Sql, q: Query) => Promise<unknown>> = {
+// ---------------------------------------------------------------- acessos (só admin)
+
+function requireAdmin(user: AuthUser): void {
+  if (user.role !== "admin") throw denied("forbidden", "Só administradores podem gerenciar os acessos.");
+}
+
+async function usersPayload(sql: Sql, user: AuthUser) {
+  const users = await db.listAppUsers(sql);
+  return { me: user.email, users: users.map((u) => ({ ...u, created_at: localStamp(u.created_at) })) };
+}
+
+async function apiUsers(sql: Sql, _q: Query, user: AuthUser) {
+  requireAdmin(user);
+  return usersPayload(sql, user);
+}
+
+/** Recusa mudanças que deixariam o sistema sem admin ou tirariam o acesso de quem está pedindo. */
+async function guardAdminChange(sql: Sql, user: AuthUser, email: string, next: db.Role | null) {
+  const current = await db.getAppUserRole(sql, email);
+  if (current !== "admin" || next === "admin") return;
+  if (email === user.email) {
+    throw new UserError("Você não pode tirar o seu próprio acesso de administrador. Peça a outro administrador.");
+  }
+  if ((await db.countAdmins(sql)) <= 1) throw new UserError("O sistema precisa de pelo menos um administrador.");
+}
+
+async function apiUserSave(sql: Sql, body: Body, user: AuthUser) {
+  requireAdmin(user);
+  const email = db.cleanEmail(body.email);
+  const role = db.cleanRole(body.role ?? "member");
+  await guardAdminChange(sql, user, email, role);
+  await db.upsertAppUser(sql, email, role, user.email);
+  return usersPayload(sql, user);
+}
+
+async function apiUserRemove(sql: Sql, body: Body, user: AuthUser) {
+  requireAdmin(user);
+  const email = db.cleanEmail(body.email);
+  if (email === user.email) throw new UserError("Você não pode remover o seu próprio acesso.");
+  await guardAdminChange(sql, user, email, null);
+  await db.removeAppUser(sql, email);
+  return usersPayload(sql, user);
+}
+
+const GET_ROUTES: Record<string, (sql: Sql, q: Query, user: AuthUser) => Promise<unknown>> = {
   "/api/init": apiInit,
   "/api/day": apiDay,
   "/api/volunteers": apiVolunteers,
   "/api/history": apiHistory,
+  "/api/users": apiUsers,
 };
 
-const POST_ROUTES: Record<string, (sql: Sql, body: Body) => Promise<unknown>> = {
+const POST_ROUTES: Record<string, (sql: Sql, body: Body, user: AuthUser) => Promise<unknown>> = {
   "/api/positions/default": apiPositionsDefault,
   "/api/generate": apiGenerate,
   "/api/validate": apiValidate,
   "/api/save": apiSave,
   "/api/volunteer": apiVolunteer,
+  "/api/users": apiUserSave,
+  "/api/users/remove": apiUserRemove,
 };
 
 // ====================================================================== HTTP
@@ -319,9 +373,9 @@ export async function handle(request: Request, opts: HandleOptions = {}): Promis
     if (!get && !post) return json({ error: "rota inválida" }, 404);
 
     const sql = opts.sql ?? db.connect();
-    await authenticate(request, sql, opts);
+    const user = await authenticate(request, sql, opts);
 
-    if (get) return json(await get(sql, Object.fromEntries(url.searchParams)));
+    if (get) return json(await get(sql, Object.fromEntries(url.searchParams), user));
     let body: unknown;
     try {
       body = JSON.parse((await request.text()) || "{}");
@@ -329,7 +383,7 @@ export async function handle(request: Request, opts: HandleOptions = {}): Promis
       return json({ error: "JSON inválido" }, 400);
     }
     if (typeof body !== "object" || body === null || Array.isArray(body)) return json({ error: "JSON inválido" }, 400);
-    return json(await post!(sql, body as Body));
+    return json(await post!(sql, body as Body, user));
   } catch (e) {
     if (e instanceof HttpError) return json({ error: e.message, code: e.code }, e.status);
     if (e instanceof UserError) return json({ error: e.message }, 400);

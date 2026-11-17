@@ -75,3 +75,12 @@ CREATE TABLE IF NOT EXISTS app_meta (
     key   TEXT PRIMARY KEY,
     value JSONB
 );
+
+-- Quem pode usar o sistema. O login (Neon Auth) aceita cadastro de qualquer pessoa;
+-- só entra quem tem o e-mail aqui. 'admin' também gerencia esta lista pela tela Acessos.
+CREATE TABLE IF NOT EXISTS app_users (
+    email      TEXT PRIMARY KEY CHECK (email = lower(email)),
+    role       TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('admin', 'member')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_by TEXT
+);

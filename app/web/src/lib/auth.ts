@@ -1,7 +1,6 @@
-/** Login por pessoa (Neon Auth). A API confere o token e a lista de e-mails autorizados. */
+/** Login por pessoa (Neon Auth). A API confere o token e a lista de acessos liberados. */
 import { createAuthClient } from "@neon/auth";
 import { BetterAuthReactAdapter } from "@neon/auth/react/adapters";
-
 
 export interface AuthResult<T> {
   data: T | null;
@@ -9,14 +8,13 @@ export interface AuthResult<T> {
 }
 
 /**
- * Métodos dos plugins de token (JWT) e de código por e-mail, que o @neon/auth já traz ligados.
+ * Métodos do plugin de código por e-mail, que o @neon/auth já traz ligado.
  * São declarados aqui porque os tipos do pacote os perdem: ele instala duas versões de
  * @better-fetch/fetch (1.3.2 e 1.3.3) e o TypeScript deixa de reconhecer os plugins.
- * Endpoints: /token, /email-otp/send-verification-otp, /email-otp/verify-email,
+ * Endpoints: /email-otp/send-verification-otp, /email-otp/verify-email,
  * /email-otp/request-password-reset e /email-otp/reset-password.
  */
 interface PluginMethods {
-  token(): Promise<AuthResult<{ token: string }>>;
   emailOtp: {
     sendVerificationOtp(body: {
       email: string;
@@ -44,8 +42,11 @@ export let authConfigured = false;
  */
 export function initAuth(url: string | null) {
   authConfigured = Boolean(url);
-  authClient = makeClient(url || `${location.origin}/login-nao-configurado`) as AuthClient;
+  authUrl = (url || `${location.origin}/login-nao-configurado`).replace(/\/+$/, "");
+  authClient = makeClient(authUrl) as AuthClient;
 }
+
+let authUrl = "";
 
 // ---------------------------------------------------------------- token para a API
 
@@ -61,17 +62,44 @@ function expiryOf(token: string): number {
   }
 }
 
+const isJwt = (value: unknown): value is string => typeof value === "string" && value.split(".").length === 3;
+
+/**
+ * Busca o JWT da sessão.
+ *
+ * O caminho certo nesta biblioteca é getSession(): ela troca `session.token` pelo JWT que o
+ * servidor manda junto. NÃO usar authClient.token(): a biblioteca trata /token como "consultar
+ * sessão" e, quando já tem a sessão em memória, devolve { session, user } sem o campo token
+ * (era o que fazia o login voltar para a tela de entrada).
+ *
+ * `fresh` manda o cabeçalho X-Force-Fetch, que faz a biblioteca ignorar a sessão em memória.
+ */
+async function fetchJwt(fresh: boolean): Promise<string | null> {
+  const { data } = await authClient.getSession(
+    fresh ? { fetchOptions: { headers: { "X-Force-Fetch": "true" } } } : undefined,
+  );
+  if (!data?.session) return null;
+  if (isJwt(data.session.token)) return data.session.token;
+  // Reserva: pede o JWT direto ao servidor de login, sem passar pela biblioteca.
+  const r = await fetch(`${authUrl}/token`, { credentials: "include" });
+  const body = r.ok ? ((await r.json()) as { token?: unknown }) : null;
+  return isJwt(body?.token) ? body.token : null;
+}
+
 /**
  * Token de acesso da sessão atual (vale 15 minutos; é renovado 1 minuto antes de vencer).
  * Devolve null se não houver sessão.
  */
 export function getToken(force = false): Promise<string | null> {
-  if (!force && cached && cached.expiresAt - Date.now() > 60_000) return Promise.resolve(cached.token);
+  const valid = (t: typeof cached) => !!t && t.expiresAt - Date.now() > 60_000;
+  if (!force && valid(cached)) return Promise.resolve(cached!.token);
   pending ??= (async () => {
     try {
-      const { data } = await authClient.token();
-      cached = data?.token ? { token: data.token, expiresAt: expiryOf(data.token) } : null;
-      return cached?.token ?? null;
+      let token = await fetchJwt(force);
+      // a sessão em memória pode trazer um JWT já vencido: nesse caso busca um novo
+      if (!force && token && !valid({ token, expiresAt: expiryOf(token) })) token = await fetchJwt(true);
+      cached = token ? { token, expiresAt: expiryOf(token) } : null;
+      return token;
     } catch {
       cached = null;
       return null;

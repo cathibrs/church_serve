@@ -11,8 +11,8 @@ COMO ENTRAR
    de pelo menos 8 caracteres. Você recebe um código de 6 números por e-mail (confira
    a caixa de spam); digite o código para confirmar.
 3. Nas próximas vezes, é só "Entrar" com e-mail e senha.
-4. Só entram os e-mails liberados pela liderança. Se aparecer "Sem acesso", peça a
-   liberação do seu e-mail.
+4. Só entram os e-mails liberados por um administrador. Se aparecer "Sem acesso", peça
+   a um administrador para liberar o seu e-mail na tela "Acessos".
 5. Esqueceu a senha? Clique em "Esqueci a senha" e siga o código enviado por e-mail.
 6. Para sair, use "Sair" no menu lateral.
 
@@ -31,6 +31,13 @@ COMO USAR
    - ou use o botão "Posições". "Usar como padrão" guarda a escolha para os próximos cultos.
 6. Em "Exportar": baixar o mapa ou a ficha em PNG, ou imprimir.
 7. O menu lateral pode ser recolhido (botão "Recolher menu" ou Ctrl+B) para o mapa ficar maior.
+
+ACESSOS (só administradores)
+- No menu "Acessos", o administrador libera o e-mail de quem pode usar o sistema e
+  escolhe o papel: Membro (usa a escala) ou Administrador (também gerencia os acessos).
+- A pessoa liberada cria a própria conta no site, com esse e-mail.
+- Remover um e-mail da lista bloqueia a pessoa na hora.
+- Sempre fica pelo menos um administrador: o sistema não deixa remover o último.
 
 VOLUNTÁRIOS
 - No cadastro há o campo "Observações" (ex.: só pode até as 10h). Quem tem observação

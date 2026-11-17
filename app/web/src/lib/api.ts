@@ -49,6 +49,26 @@ export interface InitData {
   team: string;
   positions: Position[];
   default_active: string[];
+  /** quem está logado, já validado pela API */
+  user: { email: string; role: Role };
+}
+
+export type Role = "admin" | "member";
+
+/** Um e-mail com acesso liberado e a situação da conta dele no login. */
+export interface AccessUser {
+  email: string;
+  role: Role;
+  created_at: string;
+  created_by: string | null;
+  name: string | null;
+  has_account: boolean;
+  verified: boolean;
+}
+
+export interface AccessList {
+  me: string;
+  users: AccessUser[];
 }
 
 export interface DayData {
@@ -176,4 +196,8 @@ export const api = {
   saveVolunteer: (body: Partial<Volunteer>) => request<{ id: number }>("/api/volunteer", body),
   history: (team?: string) => request<HistoryData>(`/api/history?team=${encodeURIComponent(team || "")}`),
   setDefaultPositions: (codes: string[]) => request<{ default_active: string[] }>("/api/positions/default", { codes }),
+  // só para administradores
+  users: () => request<AccessList>("/api/users"),
+  saveUser: (email: string, role: Role) => request<AccessList>("/api/users", { email, role }),
+  removeUser: (email: string) => request<AccessList>("/api/users/remove", { email }),
 };

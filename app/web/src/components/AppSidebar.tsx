@@ -1,15 +1,16 @@
 import { useEffect } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { CalendarRange, History, LogOut, PanelLeftClose, PanelLeftOpen, Users } from "lucide-react";
+import { CalendarRange, History, KeyRound, LogOut, PanelLeftClose, PanelLeftOpen, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tooltip } from "./ui/tooltip";
 
-export type Page = "escala" | "voluntarios" | "historico";
+export type Page = "escala" | "voluntarios" | "historico" | "acessos";
 
-const NAV: { id: Page; label: string; icon: React.ElementType; hint: string }[] = [
+const NAV: { id: Page; label: string; icon: React.ElementType; hint: string; adminOnly?: boolean }[] = [
   { id: "escala", label: "Escala", icon: CalendarRange, hint: "Mapa e ficha do culto" },
   { id: "voluntarios", label: "Voluntários", icon: Users, hint: "Cadastro e permissões" },
   { id: "historico", label: "Histórico e faltas", icon: History, hint: "Rotatividade e ausências" },
+  { id: "acessos", label: "Acessos", icon: KeyRound, hint: "Quem pode entrar", adminOnly: true },
 ];
 
 const OPEN_W = 236;
@@ -20,6 +21,7 @@ export function AppSidebar({
   onPage,
   onSignOut,
   userEmail,
+  isAdmin,
   collapsed,
   onToggle,
 }: {
@@ -27,6 +29,7 @@ export function AppSidebar({
   onPage: (p: Page) => void;
   onSignOut: () => void;
   userEmail: string;
+  isAdmin: boolean;
   collapsed: boolean;
   onToggle: () => void;
 }) {
@@ -83,7 +86,7 @@ export function AppSidebar({
 
       {/* navegação */}
       <nav className={cn("flex flex-col gap-1", collapsed ? "p-2" : "p-3")}>
-        {NAV.map((n) => {
+        {NAV.filter((n) => isAdmin || !n.adminOnly).map((n) => {
           const on = page === n.id;
           const Icon = n.icon;
           const btn = (

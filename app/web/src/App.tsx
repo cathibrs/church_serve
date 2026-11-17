@@ -1,18 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
-import { Toaster, toast } from "sonner";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { api, ApiError, type InitData } from "@/lib/api";
 import { authClient, authConfigured, clearToken, signOut } from "@/lib/auth";
-import { AppSidebar, type Page } from "@/components/AppSidebar";
-import { TooltipProvider } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
-import { EscalaPage } from "@/pages/Escala";
-import { VoluntariosPage } from "@/pages/Voluntarios";
-import { HistoricoPage } from "@/pages/Historico";
 import { AccessNotice, LoginPage } from "@/pages/Login";
 
-const toaster = <Toaster position="bottom-right" richColors closeButton toastOptions={{ className: "text-[13px]" }} />;
+// O sistema (menu e telas) fica em um pacote separado: só é baixado depois que a API libera.
+const Shell = lazy(() => import("./Shell"));
 
 const Loading = () => (
   <div className="flex h-full items-center justify-center text-muted-foreground">
@@ -20,10 +14,12 @@ const Loading = () => (
   </div>
 );
 
-/** Porta de entrada: só mostra o sistema para quem está logado com e-mail confirmado. */
+/** Porta de entrada: sem sessão com e-mail confirmado, só existe a tela de login. */
 export default function App({ serverDown = false }: { serverDown?: boolean }) {
   const session = authClient.useSession();
   const user = session.data?.user;
+  /** Motivo mostrado no login quando a API recusa uma sessão que o navegador achava válida. */
+  const [notice, setNotice] = useState("");
 
   if (serverDown)
     return (
@@ -42,60 +38,56 @@ export default function App({ serverDown = false }: { serverDown?: boolean }) {
       </AccessNotice>
     );
   if (session.isPending) return <Loading />;
-  if (!user) return <LoginPage />;
+  if (!user) return <LoginPage notice={notice} />;
   if (!user.emailVerified) return <LoginPage unverifiedEmail={user.email} onVerified={() => session.refetch()} />;
-  return <Shell key={user.id} email={user.email} />;
+  return (
+    <Gate
+      key={user.id}
+      onReady={() => setNotice("")}
+      onRejected={(reason) => {
+        setNotice(`O servidor não aceitou a sua sessão (${reason}). Entre de novo.`);
+        signOut().catch(() => {});
+      }}
+    />
+  );
 }
 
-function Shell({ email }: { email: string }) {
+/**
+ * Valida na API antes de mostrar qualquer coisa: /api/init confere o token, o e-mail
+ * confirmado e o acesso liberado. Até a resposta chegar só aparece "Carregando", e o
+ * pacote do sistema nem é pedido ao servidor.
+ */
+function Gate({ onReady, onRejected }: { onReady: () => void; onRejected: (reason: string) => void }) {
   const [init, setInit] = useState<InitData | null>(null);
   const [denied, setDenied] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
-  const [page, setPage] = useState<Page>(() => {
-    const h = location.hash.slice(1);
-    return h === "voluntarios" || h === "historico" ? h : "escala";
-  });
-  const [goto, setGoto] = useState<{ date: string; team: string } | null>(null);
-  const [collapsed, setCollapsed] = useState(() => {
-    try {
-      if (location.search.includes("menu=recolhido")) return true;
-      return localStorage.getItem("sidebar-collapsed") === "1";
-    } catch {
-      return false;
-    }
-  });
-  const toggleSidebar = useCallback(
-    () =>
-      setCollapsed((c) => {
-        try {
-          localStorage.setItem("sidebar-collapsed", c ? "0" : "1");
-        } catch {
-          /* sem armazenamento local */
-        }
-        return !c;
-      }),
-    [],
-  );
 
   useEffect(() => {
     let alive = true;
     setFailed(null);
     api
       .init()
-      .then((d) => alive && setInit(d))
+      .then((d) => {
+        if (!alive) return;
+        setInit(d);
+        onReady();
+      })
       .catch((e) => {
         if (!alive) return;
         if (e instanceof ApiError && e.denied) setDenied(e.message);
-        else if (e instanceof ApiError && e.status === 401) signOut().catch(() => {});
-        else setFailed(e.message);
+        else if (e instanceof ApiError && e.status === 401) onRejected(e.message.replace(/\.$/, ""));
+        else setFailed(e instanceof Error ? e.message : String(e));
       });
     return () => {
       alive = false;
     };
+    // onReady e onRejected mudam a cada desenho do App; a validação roda uma vez por tentativa.
   }, [attempt]);
 
-  const leave = () => signOut().catch((e) => toast.error(e.message));
+  const leave = () => {
+    signOut().catch(() => location.reload());
+  };
 
   if (denied)
     return (
@@ -128,48 +120,10 @@ function Shell({ email }: { email: string }) {
         {failed}
       </AccessNotice>
     );
-
+  if (!init) return <Loading />;
   return (
-    <TooltipProvider delayDuration={250}>
-      <div className="flex h-full">
-        <AppSidebar
-          page={page}
-          onPage={setPage}
-          onSignOut={leave}
-          userEmail={email}
-          collapsed={collapsed}
-          onToggle={toggleSidebar}
-        />
-        <main className="min-w-0 flex-1 overflow-hidden">
-          {!init ? (
-            <Loading />
-          ) : (
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={page}
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -4 }}
-                transition={{ duration: 0.16 }}
-                className="h-full"
-              >
-                {page === "escala" && <EscalaPage init={init} goto={goto} onGotoDone={() => setGoto(null)} />}
-                {page === "voluntarios" && <VoluntariosPage init={init} />}
-                {page === "historico" && (
-                  <HistoricoPage
-                    init={init}
-                    onOpen={(date, team) => {
-                      setGoto({ date, team });
-                      setPage("escala");
-                    }}
-                  />
-                )}
-              </motion.div>
-            </AnimatePresence>
-          )}
-        </main>
-      </div>
-      {toaster}
-    </TooltipProvider>
+    <Suspense fallback={<Loading />}>
+      <Shell init={init} onSignOut={leave} />
+    </Suspense>
   );
 }

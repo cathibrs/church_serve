@@ -35,8 +35,6 @@ neon deploy            # cria o que neon.ts declara e grava as variáveis em .en
   padrão, e banco e funções na mesma região deixam o sistema mais rápido.
 - `neon deploy` e `neon env pull` gravam `DATABASE_URL`, `DATABASE_URL_UNPOOLED`,
   `NEON_AUTH_BASE_URL` e `NEON_AUTH_JWKS_URL` em `.env.local` (modelo em `.env.example`).
-- Acrescente à mão, no mesmo arquivo, `ALLOWED_EMAILS` com os e-mails de quem pode usar a escala.
-  O `neon env pull` preserva essa linha.
 - O site exige e-mail confirmado por código mesmo que a opção *Verify email at signup* do Neon
   esteja desligada (é o padrão): quem entra sem confirmar cai na tela do código.
 
@@ -69,21 +67,35 @@ O comando mostra quantas linhas leu e quantas gravou em cada tabela. O que ele f
 
 1. Crie o site apontando para este repositório (ou use `netlify deploy --build --prod` na raiz).
    O `netlify.toml` já informa a pasta, o comando de build e as funções.
-2. Em **Project configuration > Environment variables**, cadastre `DATABASE_URL`, `NEON_AUTH_BASE_URL`,
-   `NEON_AUTH_JWKS_URL` e `ALLOWED_EMAILS` (os valores estão no seu `.env.local`). Só a API usa essas
-   variáveis: nenhuma é embutida no site durante o build. A página pede o endereço do login à API
-   (`/api/config`) quando abre.
+2. Em **Project configuration > Environment variables**, cadastre `DATABASE_URL` e
+   `NEON_AUTH_BASE_URL` (os valores estão no seu `.env.local`). Só a API usa essas variáveis: nenhuma
+   é embutida no site durante o build. A página pede o endereço do login à API (`/api/config`) quando
+   abre. `NEON_AUTH_JWKS_URL` é opcional: sem ela, a API usa `NEON_AUTH_BASE_URL` + `/.well-known/jwks.json`.
 3. Libere o endereço do site no login do Neon; sem isso o login responde `invalid domain`:
    `neon neon-auth domain add https://seu-site.netlify.app`
 4. Publique de novo depois de mudar variáveis: elas só valem a partir da publicação seguinte.
 
-### 4. Primeiro acesso
+### 4. Primeiro acesso e administradores
 
-Cada líder abre o site, clica em **Criar conta**, informa o e-mail que está em `ALLOWED_EMAILS` e
-confirma com o código recebido por e-mail. Quem criar conta com outro e-mail entra na tela
-"Sem acesso" e não vê nenhum dado.
+Quem pode entrar fica na tabela `app_users` do banco, com um papel:
 
-Para liberar ou remover alguém: edite `ALLOWED_EMAILS` no Netlify e publique de novo.
+- **Membro**: usa a escala, os voluntários e o histórico.
+- **Administrador**: além disso, libera e remove e-mails na tela **Acessos**.
+
+O primeiro administrador é criado pelo terminal (o mesmo comando serve para recuperar o acesso se
+ninguém mais conseguir entrar na tela Acessos):
+
+```bash
+npm run admin -- pessoa@exemplo.com
+```
+
+Daí em diante é tudo pelo site: o administrador libera o e-mail na tela Acessos, e a pessoa abre o
+site, clica em **Criar conta** com esse e-mail e confirma com o código recebido. Quem criar conta
+com um e-mail não liberado cai na tela "Sem acesso" e não vê nenhum dado. Remover um e-mail da
+lista bloqueia a pessoa na hora; não é preciso publicar o site de novo.
+
+O site só baixa e mostra o sistema depois que a API valida a sessão e o acesso: quem não está
+logado, ou não foi liberado, recebe apenas a tela de login.
 
 Os e-mails de código saem pelo remetente compartilhado do Neon (`auth@mail.myneon.app`) e podem
 cair no spam. Para uso contínuo, o Neon recomenda configurar um SMTP próprio
