@@ -129,7 +129,7 @@ export default function Shell({ me, first, onSignOut }: { me: Me; first: Screen;
         </main>
       </div>
       <ChangePassword open={changingPassword} onOpenChange={setChangingPassword} />
-      <Toaster position="bottom-right" richColors closeButton toastOptions={{ className: "text-[13px]" }} />
+      <Toaster position="bottom-right" richColors closeButton toastOptions={{ className: "text-sm" }} />
     </TooltipProvider>
   );
 }

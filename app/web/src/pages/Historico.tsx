@@ -78,7 +78,7 @@ export function HistoricoPage({
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex flex-wrap items-center gap-2 border-b bg-background/85 px-3 py-2.5 backdrop-blur md:px-5">
         <div className="mr-auto">
-          <h1 className="text-[15px] leading-tight font-semibold">Histórico e faltas</h1>
+          <h1 className="text-lg leading-tight font-semibold">Histórico e faltas</h1>
           <p className="text-xs text-muted-foreground">Quem serviu em quê, quantas vezes, e quem mais falta.</p>
         </div>
         <Select value={team ?? "all"} onValueChange={(t) => onOpen({ page: "historico", team: t === "all" ? undefined : t })}>
@@ -109,41 +109,52 @@ export function HistoricoPage({
 
         {/* ranking + escalas + faltas por culto */}
         <div className="grid gap-3 lg:grid-cols-3">
-          <Card className="flex h-[300px] flex-col overflow-hidden">
+          <Card className="flex h-[340px] flex-col overflow-hidden">
             <CardHeader className="min-h-10 py-1.5">
               <CardTitle>Quem mais faltou</CardTitle>
               <span className="text-xs text-muted-foreground">{ranking.length} pessoa(s)</span>
             </CardHeader>
-            <div className="min-h-0 flex-1 space-y-[3px] overflow-y-auto px-3 py-2">
-              {ranking.map((r, i) => (
-                <Tooltip key={r.id} tap side="right" content={<AbsenceList items={r.absences} total={r.faltas} />}>
-                <div className="grid cursor-default grid-cols-[120px_1fr_24px] items-center gap-2 text-xs">
-                  <span className="truncate text-right">{r.name}</span>
-                  <div className="h-3 rounded-sm bg-muted">
-                    <motion.div
-                      initial={{ width: 0 }}
-                      animate={{ width: `${(r.faltas / maxAbs) * 100}%` }}
-                      transition={{ duration: 0.5, delay: Math.min(i * 0.015, 0.4) }}
-                      className="h-full rounded-sm bg-red-500"
-                    />
+            {/* a última falta fica escrita na linha: nada depende de passar o mouse */}
+            <div className="min-h-0 flex-1 divide-y overflow-y-auto px-3">
+              {ranking.map((r, i) => {
+                const last = r.absences[0];
+                return (
+                  <div key={r.id} className="py-2">
+                    <div className="flex items-baseline justify-between gap-2 text-sm">
+                      <span className="truncate font-medium">{r.name}</span>
+                      <b className="shrink-0 text-red-600 tabular-nums">
+                        {r.faltas} {r.faltas === 1 ? "falta" : "faltas"}
+                      </b>
+                    </div>
+                    <div className="mt-1 h-2 rounded-sm bg-muted">
+                      <motion.div
+                        initial={{ width: 0 }}
+                        animate={{ width: `${(r.faltas / maxAbs) * 100}%` }}
+                        transition={{ duration: 0.5, delay: Math.min(i * 0.015, 0.4) }}
+                        className="h-full rounded-sm bg-red-500"
+                      />
+                    </div>
+                    {last && (
+                      <div className="mt-1 truncate text-xs text-muted-foreground">
+                        última em {br(last.date)} · {last.reason || "sem motivo informado"}
+                      </div>
+                    )}
                   </div>
-                  <b className="tabular-nums">{r.faltas}</b>
-                </div>
-                </Tooltip>
-              ))}
+                );
+              })}
               {!ranking.length && <p className="py-8 text-center text-sm text-muted-foreground">Nenhuma falta registrada.</p>}
             </div>
           </Card>
 
-          <Card className="flex h-[300px] flex-col overflow-hidden">
+          <Card className="flex h-[340px] flex-col overflow-hidden">
             <CardHeader className="min-h-10 py-1.5">
               <CardTitle>Escalas salvas</CardTitle>
-              <span className="text-xs text-muted-foreground">clique para abrir</span>
+              <span className="text-xs text-muted-foreground">toque numa linha para abrir</span>
             </CardHeader>
             <div className="min-h-0 flex-1 overflow-y-auto">
               <table className="w-full text-xs">
                 <thead className="sticky top-0 bg-muted/90 text-muted-foreground">
-                  <tr className="h-7 text-left [&>th]:font-medium">
+                  <tr className="h-8 text-left [&>th]:font-medium">
                     <th className="pl-3">Data</th>
                     <th>Equipe</th>
                     <th className="text-center max-md:px-1">Posições</th>
@@ -156,7 +167,7 @@ export function HistoricoPage({
                     <tr
                       key={s.id}
                       onClick={() => s.team && onOpen({ page: "escala", date: s.service_date, team: s.team })}
-                      className="group h-7 cursor-pointer border-t hover:bg-muted/50"
+                      className="h-9 cursor-pointer border-t hover:bg-muted/50"
                     >
                       <td className="pl-3 tabular-nums">
                         {br(s.service_date)} <span className="text-muted-foreground max-md:hidden">{s.service_type.slice(0, 3)}</span>
@@ -165,7 +176,7 @@ export function HistoricoPage({
                       <td className="text-center tabular-nums">{s.itens}</td>
                       <td className={cn("text-center tabular-nums", s.faltas && "font-semibold text-red-600")}>{s.faltas}</td>
                       <td className="pr-2 text-right">
-                        <ChevronRight className="inline size-3.5 opacity-0 transition group-hover:opacity-60" />
+                        <ChevronRight className="inline size-4 opacity-50" />
                       </td>
                     </tr>
                   ))}
@@ -174,7 +185,7 @@ export function HistoricoPage({
             </div>
           </Card>
 
-          <Card className="flex h-[300px] flex-col overflow-hidden">
+          <Card className="flex h-[340px] flex-col overflow-hidden">
             <CardHeader className="min-h-10 py-1.5">
               <CardTitle>Faltas por culto</CardTitle>
               <span className="text-xs text-muted-foreground">últimos {recent.length}</span>
@@ -183,7 +194,7 @@ export function HistoricoPage({
               {recent.map((s, i) => (
                 <Tooltip key={s.id} tap content={`${br(s.service_date)} · ${teamLabel(s.team)} · ${s.faltas} falta(s)`}>
                   <div className="flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-1">
-                    <span className="text-[11px] font-semibold tabular-nums">{s.faltas}</span>
+                    <span className="text-xs font-semibold tabular-nums">{s.faltas}</span>
                     <motion.div
                       initial={{ height: 0 }}
                       animate={{ height: `${(s.faltas / maxSchedAbs) * 100}%` }}
@@ -196,7 +207,7 @@ export function HistoricoPage({
             </div>
             <div className="flex gap-1 px-3 pb-2">
               {recent.map((s, i) => (
-                <span key={s.id} style={{ visibility: recent.length > 10 && i % 2 ? "hidden" : "visible" }} className="min-w-0 flex-1 overflow-visible text-center text-[11px] tracking-tight whitespace-nowrap text-muted-foreground tabular-nums">
+                <span key={s.id} style={{ visibility: recent.length > 10 && i % 2 ? "hidden" : "visible" }} className="min-w-0 flex-1 overflow-visible text-center text-xs tracking-tight whitespace-nowrap text-muted-foreground tabular-nums">
                   {br(s.service_date).slice(0, 5)}
                 </span>
               ))}
@@ -208,23 +219,29 @@ export function HistoricoPage({
         <Card className="overflow-hidden">
           <CardHeader className="min-h-10 py-1.5">
             <CardTitle>
-              Quantas vezes cada um serviu em cada função
+              Quantas vezes cada pessoa serviu em cada função
               <span className="text-xs font-normal text-muted-foreground">· {rows.length} pessoa(s)</span>
             </CardTitle>
             <div className="flex items-center gap-2 max-md:w-full">
               <div className="relative max-md:min-w-0 max-md:flex-1">
                 <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar" className="h-8 pl-8 text-[13px] md:w-44" />
+                <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Procurar pelo nome" className="h-9 pl-8 md:w-52" />
               </div>
-              <Label className="h-8 shrink-0 rounded-md border border-input px-2.5 text-xs">
-                <Switch checked={onlyAbs} onCheckedChange={setOnlyAbs} /> Só com faltas
+              <Label className="h-9 shrink-0 rounded-md border border-input px-2.5 text-sm">
+                <Switch checked={onlyAbs} onCheckedChange={setOnlyAbs} /> Só quem faltou
               </Label>
             </div>
           </CardHeader>
+          <p className="border-b px-4 py-2 text-xs text-muted-foreground">
+            <b className="text-foreground">Como ler:</b> Coz = Cozinha · Conf = Confete · Ban E / Ban S = Banheiro na entrada /
+            na saída · Altar = Limpeza do altar · L.Conf = Limpeza do confete · Rec = Recepção · BM / BF = banheiro masculino /
+            feminino · BK = berçário · GM / GF = galeria masculina / feminina · 01 a 22 = corredores do mapa. Toque no número
+            de faltas para ver as datas.
+          </p>
           <div className="max-h-[calc(100dvh-150px)] overflow-auto">
             <table className="w-full border-collapse text-xs">
               <thead className="sticky top-0 z-10 bg-muted text-muted-foreground">
-                <tr className="h-6 text-[11px] tracking-wide uppercase">
+                <tr className="h-6 text-xs tracking-wide uppercase">
                   <th className="sticky left-0 z-20 bg-muted" colSpan={3} />
                   <th className="border-l px-1" colSpan={TASKS.length}>
                     Tarefas
@@ -335,7 +352,7 @@ function Kpi({
       </span>
       <div className="min-w-0">
         <div className="text-lg leading-tight font-semibold tabular-nums">{value ?? "–"}</div>
-        <div className="truncate text-xs text-muted-foreground max-lg:leading-tight max-lg:whitespace-normal">{label}</div>
+        <div className="text-xs leading-tight text-muted-foreground">{label}</div>
       </div>
     </Card>
   );

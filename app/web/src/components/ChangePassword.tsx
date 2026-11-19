@@ -80,7 +80,7 @@ export function ChangePassword({ open, onOpenChange }: { open: boolean; onOpenCh
           />
         </div>
         {error && (
-          <p role="alert" className="rounded-md bg-destructive-soft px-3 py-2 text-[13px] text-destructive">
+          <p role="alert" className="rounded-md bg-destructive-soft px-3 py-2 text-sm text-destructive">
             {error}
           </p>
         )}

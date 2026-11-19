@@ -15,20 +15,28 @@ COMO ENTRAR
 5. Para sair, use "Sair" no menu lateral.
 
 COMO USAR
-1. Em "Escala", confira a data e a equipe. A equipe sugerida é a última usada naquele dia.
-2. Em "Presença", clique no nome de quem faltou. Embaixo aparece o campo "Motivo da falta"
-   (opcional); o motivo fica no histórico (passe o mouse no número de faltas; no celular, toque).
-3. Clique em "Gerar escala". A escala já é salva na hora.
-4. Para trocar alguém, clique no nome no mapa ou na ficha e escolha outra pessoa.
-   - A lista mostra primeiro quem está livre.
-   - Escolher alguém que já tem função faz a troca entre os dois.
-   - Cada troca é salva sozinha ("Salvo às ..." embaixo do título).
-5. Qualquer posição pode ser ligada ou desligada:
-   - clique numa posição apagada para ativar;
-   - use "Desativar posição" na lista de pessoas;
-   - ou use o botão "Posições". "Usar como padrão" guarda a escolha para os próximos cultos.
-6. Em "Exportar": baixar o mapa ou a ficha em PNG, ou imprimir.
-7. O menu lateral pode ser recolhido (botão "Recolher menu" ou Ctrl+B) para o mapa ficar maior.
+A tela "Escala" mostra quatro passos numerados, de cima para baixo. É só seguir a ordem.
+1. Qual culto? Confira a data e a equipe. A equipe sugerida é a última usada naquele dia.
+2. Quem faltou? Todos começam como presentes: toque no nome de quem não veio (fica
+   vermelho, com a palavra "faltou"). Embaixo aparece "Por que faltou?", que é opcional e fica
+   guardado no histórico. Os recados dos voluntários (ex.: só pode até as 10h) aparecem logo
+   abaixo, em amarelo.
+3. Fazer a escala. Toque em "Fazer a escala". Ela já é salva na hora.
+4. Confira e troque. A escala aparece em lista e, logo abaixo, no desenho do templo.
+   Toque num nome (na lista ou no desenho) e escolha outra pessoa.
+   - Primeiro aparecem as pessoas sem função, as melhores opções.
+   - Escolher alguém que já está em outra posição troca os dois de lugar.
+   - Cada troca é salva sozinha ("Tudo salvo às ..." embaixo do título).
+Ligar ou desligar posições: use o link "Ligar ou desligar posições" (no passo 3 ou no fim da
+lista), toque numa posição cinza no desenho para ligar, ou use "Desligar posição" na lista de
+pessoas. "Guardar como padrão da equipe" vale para os próximos cultos.
+Imprimir ou baixar: botão no topo da tela (imprimir, ou baixar a lista ou o mapa como imagem).
+O menu lateral pode ser recolhido (botão "Recolher menu" ou Ctrl+B). No celular, o menu fica no
+botão com três tracinhos, no topo.
+
+HISTÓRICO
+- "Quem mais faltou" mostra quantas faltas cada pessoa tem e a última, com o motivo.
+- Na tabela "Quantas vezes cada pessoa serviu", toque no número de faltas para ver as datas.
 
 ACESSOS (só administradores)
 - No menu "Acessos", o administrador libera o e-mail de quem pode usar o sistema e
@@ -37,9 +45,9 @@ ACESSOS (só administradores)
     Administrador  vê todas as equipes e gerencia os acessos
 - Ao liberar, o sistema cria a conta e mostra uma senha aleatória, uma única vez, para
   o administrador repassar à pessoa. Anote antes de fechar: o sistema não guarda a senha.
-- O ícone de chave na linha gera uma senha nova, para quando a anterior se perder.
-- Para mudar o papel ou as equipes de alguém, use o lápis na linha da pessoa.
-- "Usar como padrão", na tela de posições, agora vale para a equipe que está aberta.
+- O botão "Nova senha" na linha gera uma senha nova, para quando a anterior se perder.
+- Para mudar o papel ou as equipes de alguém, use o botão "Alterar" na linha da pessoa.
+- "Guardar como padrão da equipe", em "Ligar ou desligar posições", vale para a equipe que está aberta.
 - Remover um e-mail da lista bloqueia a pessoa na hora.
 - Sempre fica pelo menos um administrador: o sistema não deixa remover o último.
 

@@ -104,7 +104,7 @@ export function mapSVG(s: MapState, forExport = false) {
     const name = vid ? (s.vols[vid]?.name ?? "?") : "";
     const bad = s.bad.has(code);
     const fill = !on ? "#c4c7cc" : bad ? "#dc2626" : COLORS[COLOR_OF[code]].dark;
-    const txt = !on ? "+ ativar" : name || (forExport ? "" : "vazio");
+    const txt = !on ? "+ ligar" : name || (forExport ? "" : "vazio");
     const cls = !on ? "nm off" : name ? (bad ? "nm bad" : "nm") : "nm empty";
     const f = name && on ? fit(txt, maxW) : "";
     const vertical = al === "vl" || al === "vr";
@@ -139,7 +139,7 @@ export function mapSVG(s: MapState, forExport = false) {
     const y = REC_Y0 + Math.floor(i / cols) * dy;
     const bad = s.bad.has(code);
     const cls = !on ? "rn off" : name ? (bad ? "rn bad" : "rn") : "rn empty";
-    const label = !on ? "+ ativar" : name || "vazio";
+    const label = !on ? "+ ligar" : name || "vazio";
     rec += `<g class="slot" data-code="${code}"><rect class="hit" x="${x - 6}" y="${y - lay.font}" width="${lay.w + 12}" height="${dy - 2}" rx="5" fill="transparent"/><text x="${x}" y="${y}" class="${cls}" style="font-size:${on ? lay.font : 16}px"${name && on ? fit(name, lay.w, lay.font) : ""}>${esc(label)}</text></g>`;
   });
   const recWide = cols === 3;

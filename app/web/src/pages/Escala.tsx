@@ -1,22 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Route } from "@/lib/screens";
-import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
 import {
   AlertTriangle,
   Check,
   ChevronDown,
   CircleAlert,
-  Download,
   Image,
   Loader2,
   Printer,
+  RotateCcw,
   Search,
   Settings2,
   Sparkles,
   StickyNote,
-  UserCheck,
   Users,
+  X,
 } from "lucide-react";
 import {
   api,
@@ -33,7 +32,6 @@ import { ENTRY_CATS, EXIT_CATS, MAP_CATS, REC, allowed, swapGroup } from "@/lib/
 import { FICHA, downloadPNG, fichaSVG, mapSVG, type MapState } from "@/lib/map";
 import { cn, normalize, teamLabel } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -44,7 +42,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Confirm } from "@/components/ui/alert-dialog";
-import { Tooltip } from "@/components/ui/tooltip";
 import { PersonPicker, type PickerTarget } from "@/components/PersonPicker";
 import { PositionsSheet } from "@/components/PositionsSheet";
 
@@ -115,7 +112,6 @@ export function EscalaPage({
   const [picker, setPicker] = useState<PickerTarget | null>(null);
   const [sheet, setSheet] = useState(false);
   const [confirmGen, setConfirmGen] = useState(false);
-  const [presenceOpen, setPresenceOpen] = useState(!day.saved);
   const [presenceQ, setPresenceQ] = useState("");
   const [generating, setGenerating] = useState(false);
   const [version, setVersion] = useState(0); // muda a cada edição manual -> salvamento automático
@@ -193,11 +189,10 @@ export function EscalaPage({
       setAssign(next);
       setWarnings(r.warnings);
       setIssues(r.issues);
-      setPresenceOpen(false);
       latest.current = { ...latest.current, assign: next, active: act };
       await doSave();
       const people = new Set(r.assignments.map((a) => a.volunteer_id)).size;
-      toast.success(`Escala gerada e salva · ${people} pessoas em ${r.assignments.length} posições`);
+      toast.success(`Escala feita e salva: ${people} pessoas em ${r.assignments.length} posições.`);
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -259,7 +254,7 @@ export function EscalaPage({
   const openSlot = (code: string, el: Element) => {
     if (!active.has(code)) {
       setActiveCode(code, true);
-      toast(`${positions[code]?.name} ativada`, { description: "Clique de novo para escolher a pessoa." });
+      toast(`${positions[code]?.name} ligada`, { description: "Toque de novo para escolher a pessoa." });
       return;
     }
     setPicker({ code, rect: el.getBoundingClientRect() });
@@ -272,7 +267,9 @@ export function EscalaPage({
       const where = Object.keys(assign).filter((c) => assign[c] === id);
       if (where.length) {
         setAssign((p) => Object.fromEntries(Object.entries(p).filter(([, v]) => v !== id)));
-        toast(`${vols[id]?.name} com falta`, { description: `Retirado(a) de ${where.length} posição(ões).` });
+        toast(`${vols[id]?.name} faltou`, {
+          description: `Saiu da escala (${where.length} ${where.length === 1 ? "posição ficou vazia" : "posições ficaram vazias"}).`,
+        });
       }
     } else n.add(id);
     setPresent(n);
@@ -322,15 +319,15 @@ export function EscalaPage({
       }
     }
     if (!placed.length) {
-      toast.warning("Não há vaga livre na recepção (ou a pessoa não pode ficar na recepção).");
+      toast.warning("Não deu para colocar na recepção: não há vaga livre, ou a pessoa não pode servir na recepção.");
       return;
     }
     setActive(act);
     setAssign(next);
     setWarnings((w) => w.filter((x) => !x.startsWith("Só na ficha")));
     edited();
-    toast.success(`Encaixado(s) na recepção: ${placed.join(", ")}`, {
-      description: [moved.length ? `Tarefa passada: ${moved.join("; ")}.` : "", emptied.length ? `Ficou vazio: ${emptied.join(", ")}.` : ""]
+    toast.success(`Na recepção agora: ${placed.join(", ")}`, {
+      description: [moved.length ? `Tarefa passada para outra pessoa: ${moved.join("; ")}.` : "", emptied.length ? `Ficou vazio: ${emptied.join(", ")}.` : ""]
         .filter(Boolean)
         .join(" "),
     });
@@ -358,8 +355,6 @@ export function EscalaPage({
           ),
       )
     : [];
-  const recLast = recCodes.reduce((m, c, i) => (active.has(c) || assign[c] ? i : m), -1);
-  const recVisible = recCodes.slice(0, Math.min(recCodes.length, Math.max(recLast + 2, 20)));
   const tag = day ? `${day.date}_${day.team}` : "";
 
   const exportPng = async (kind: "map" | "ficha") => {
@@ -371,358 +366,412 @@ export function EscalaPage({
     }
   };
 
+  const presentCount = activeVols.length - absentCount;
+  /** quem veio e deixou algum recado no cadastro (ex.: só pode até as 10h) */
+  const notes = activeVols.filter((v) => present.has(v.id) && v.observation?.trim());
+  const openPositions = () => setSheet(true);
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* ------------------------------------------------ barra superior */}
-      {/* No celular são duas linhas: título e ações em cima, data e equipe embaixo. */}
-      <header className="no-print sticky top-0 z-20 flex flex-wrap items-center gap-2 border-b bg-background/85 px-3 py-2.5 backdrop-blur md:px-5">
-        <div className="min-w-0 max-md:flex-1 md:mr-1 md:min-w-[132px]">
-          <h1 className="truncate text-[15px] leading-tight font-semibold whitespace-nowrap">
-            Escala · <span className="font-normal text-muted-foreground">{day?.weekday.replace("-Feira", "-feira") ?? ""}</span>
+      <header className="no-print sticky top-0 z-20 flex items-center gap-3 border-b bg-background/85 px-3 py-2.5 backdrop-blur md:px-5">
+        <div className="min-w-0 flex-1">
+          <h1 className="truncate text-lg leading-tight font-semibold">
+            Escala do culto <span className="font-normal text-muted-foreground max-sm:hidden">· {weekday(day.weekday)}</span>
           </h1>
           <SaveIndicator state={save} />
         </div>
-        {/* a partir de `md` este grupo some (`contents`) e os campos voltam a ser itens da barra */}
-        <div className="flex flex-wrap items-center gap-2 max-md:order-1 max-md:basis-full md:contents">
-          <Input
-            type="date"
-            value={date}
-            onChange={(e) => e.target.value && changeDate(e.target.value)}
-            className="max-md:min-w-[130px] max-md:flex-1 md:w-[150px]"
-            aria-label="Data do culto"
-          />
-          <Select value={day.team} onValueChange={(team) => onOpen({ page: "escala", date: day.date, team })}>
-            <SelectTrigger className="max-md:min-w-[130px] max-md:flex-1 md:w-[200px]">
-              <Users className="size-4 text-muted-foreground" />
-              <SelectValue placeholder="Equipe" />
-            </SelectTrigger>
-            <SelectContent>
-              {me.teams.map((t) => (
-                <SelectItem key={t} value={t}>
-                  {teamLabel(t)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {day?.last_sunday && (
-            <Tooltip tap content="Quem estiver na recepção fica só na recepção (nem entrada, nem saída).">
-              <Badge variant="warning" className="h-9 rounded-md px-2.5 text-[13px]">
-                <AlertTriangle /> Último domingo
-              </Badge>
-            </Tooltip>
-          )}
-        </div>
-
-        <div className="flex-1 max-md:hidden" />
-        {/* as ações andam juntas: se a barra não couber numa linha, descem as três, alinhadas à direita */}
-        <div className="ml-auto flex items-center gap-2">
-          <Tooltip content="Ativar ou desativar posições do culto">
-            <Button variant="outline" className="max-sm:px-2.5" aria-label="Posições do culto" onClick={() => setSheet(true)}>
-              <Settings2 /> <span className="max-sm:hidden">Posições</span>{" "}
-              <span className="text-muted-foreground tabular-nums max-sm:hidden">{active.size}</span>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" disabled={!hasSchedule}>
+              <Printer /> Imprimir<span className="max-sm:hidden"> ou baixar</span>
+              <ChevronDown className="size-3.5 opacity-60" />
             </Button>
-          </Tooltip>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="max-sm:px-2.5" aria-label="Exportar" disabled={!hasSchedule}>
-                <Download /> <span className="max-sm:hidden">Exportar</span>{" "}
-                <ChevronDown className="size-3.5 opacity-60 max-sm:hidden" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={() => exportPng("map")}>
-                <Image /> Mapa em PNG
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => exportPng("ficha")}>
-                <Image /> Ficha posicional em PNG
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => setTimeout(() => window.print(), 50)}>
-                <Printer /> Imprimir
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <Button onClick={() => (hasSchedule ? setConfirmGen(true) : generate())} disabled={generating || !day}>
-            {generating ? <Loader2 className="animate-spin" /> : <Sparkles />}
-            <span>
-              Gerar<span className="max-sm:hidden"> escala</span>
-            </span>
-          </Button>
-        </div>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={() => setTimeout(() => window.print(), 50)}>
+              <Printer /> Imprimir
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => exportPng("ficha")}>
+              <Image /> Baixar a lista (imagem)
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => exportPng("map")}>
+              <Image /> Baixar o mapa (imagem)
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </header>
 
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3 md:px-5 md:py-4">
-        {/* ------------------------------------------------ presença */}
-        <Card className="no-print">
-          <CardHeader className={cn(!presenceOpen && "border-b-0")}>
-            <button className="flex items-center gap-2 text-left" onClick={() => setPresenceOpen((o) => !o)}>
-              <ChevronDown className={cn("size-4 text-muted-foreground transition-transform", !presenceOpen && "-rotate-90")} />
-              <CardTitle>
-                <UserCheck className="size-4" /> Presença
-              </CardTitle>
-              <span className="text-xs text-muted-foreground">
-                <b className="text-foreground">{activeVols.length - absentCount}</b> presentes ·{" "}
-                <b className={cn(absentCount ? "text-destructive" : "text-foreground")}>{absentCount}</b> falta(s)
-              </span>
-            </button>
-            {presenceOpen && (
-              <div className="flex items-center gap-2 max-md:w-full">
-                <div className="relative max-md:min-w-0 max-md:flex-1">
-                  <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    value={presenceQ}
-                    onChange={(e) => setPresenceQ(e.target.value)}
-                    placeholder="Buscar nome"
-                    className="h-8 pl-8 text-[13px] md:w-48"
-                  />
-                </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    setPresent(new Set(activeVols.map((v) => v.id)));
-                    if (hasSchedule) edited();
-                  }}
-                >
-                  Todos presentes
-                </Button>
+      <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-3 py-4 md:px-5 md:py-5">
+        {/* ------------------------------------------------ 1. culto */}
+        <Step n={1} title="Qual culto?" hint="Confira a data e a equipe que vai servir.">
+          <Card className="no-print space-y-3 p-3 md:p-4">
+            <div className="flex flex-wrap gap-3">
+              <label className="flex min-w-[150px] flex-1 flex-col gap-1.5 text-sm font-medium sm:max-w-[200px]">
+                Data
+                <Input type="date" value={date} onChange={(e) => e.target.value && changeDate(e.target.value)} />
+              </label>
+              <div className="flex min-w-[180px] flex-[2] flex-col gap-1.5 text-sm font-medium sm:max-w-[300px]">
+                Equipe
+                <Select value={day.team} onValueChange={(team) => onOpen({ page: "escala", date: day.date, team })}>
+                  <SelectTrigger aria-label="Equipe">
+                    <Users className="size-4 text-muted-foreground" />
+                    <SelectValue placeholder="Equipe" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {me.teams.map((t) => (
+                      <SelectItem key={t} value={t}>
+                        {teamLabel(t)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
+            </div>
+            {day.last_sunday && (
+              <p className="flex items-start gap-2 rounded-md bg-warning-soft px-3 py-2 text-sm text-[oklch(0.42_0.1_70)]">
+                <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                <span>
+                  <b>Último domingo do mês:</b> quem estiver na recepção fica só na recepção (não faz entrada nem saída).
+                </span>
+              </p>
             )}
-          </CardHeader>
-          <AnimatePresence initial={false}>
-            {presenceOpen && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: "auto", opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.2 }}
-                className="overflow-hidden"
-              >
-                <div className="px-4 pt-2 pb-3">
-                  <p className="mb-2 text-xs text-muted-foreground">Clique no nome para marcar falta. Quem falta não entra na escala.</p>
-                  {/* 140px no celular: cabem duas colunas numa tela de 360px */}
-                  <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-1 md:grid-cols-[repeat(auto-fill,minmax(150px,1fr))]">
-                    {filteredVols.map((v) => {
-                      const ok = present.has(v.id);
-                      return (
-                        <button
-                          key={v.id}
-                          onClick={() => togglePresence(v.id)}
-                          title={`${v.faltas} falta(s) no histórico${v.observation ? `
-Obs.: ${v.observation}` : ""}`}
-                          className={cn(
-                            "flex h-9 items-center gap-1.5 rounded-md border px-2 text-left text-[13px] transition-colors md:h-7",
-                            ok
-                              ? "border-input bg-background hover:bg-accent"
-                              : "border-destructive/30 bg-destructive-soft text-destructive line-through",
-                          )}
-                        >
-                          <span
-                            className={cn(
-                              "size-1.5 shrink-0 rounded-full",
-                              v.gender === "Feminino" ? "bg-rose-500" : "bg-sky-600",
-                            )}
+          </Card>
+        </Step>
+
+        {/* ------------------------------------------------ 2. presença */}
+        <Step
+          n={2}
+          title="Quem faltou?"
+          hint={
+            <>
+              Todos começam como presentes. Toque no nome de quem <b className="text-foreground">não veio</b>. Quem faltou
+              não entra na escala.
+            </>
+          }
+        >
+          <Card className="no-print">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b px-3 py-2.5 md:px-4">
+              <span className="text-sm">
+                <b className="text-base text-emerald-700 tabular-nums">{presentCount}</b> vieram ·{" "}
+                <b className={cn("text-base tabular-nums", absentCount ? "text-destructive" : "text-foreground")}>{absentCount}</b>{" "}
+                {absentCount === 1 ? "faltou" : "faltaram"}
+              </span>
+              <span className="flex items-center gap-3 text-xs text-muted-foreground">
+                <span className="flex items-center gap-1">
+                  <i className="size-2 rounded-full bg-rose-500" /> mulher
+                </span>
+                <span className="flex items-center gap-1">
+                  <i className="size-2 rounded-full bg-sky-600" /> homem
+                </span>
+              </span>
+              <div className="flex flex-1 items-center justify-end gap-2 max-sm:basis-full">
+                {activeVols.length > 12 && (
+                  <div className="relative min-w-0 flex-1 sm:max-w-56">
+                    <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      value={presenceQ}
+                      onChange={(e) => setPresenceQ(e.target.value)}
+                      placeholder="Procurar pelo nome"
+                      className="pl-8"
+                    />
+                  </div>
+                )}
+                {absentCount > 0 && (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setPresent(new Set(activeVols.map((v) => v.id)));
+                      if (hasSchedule) edited();
+                    }}
+                  >
+                    <RotateCcw /> Desmarcar faltas
+                  </Button>
+                )}
+              </div>
+            </div>
+            <div className="p-3 md:p-4">
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-1.5 md:grid-cols-[repeat(auto-fill,minmax(170px,1fr))]">
+                {filteredVols.map((v) => {
+                  const ok = present.has(v.id);
+                  return (
+                    <button
+                      key={v.id}
+                      onClick={() => togglePresence(v.id)}
+                      aria-pressed={!ok}
+                      aria-label={`${v.name}: ${ok ? "veio" : "faltou"}`}
+                      className={cn(
+                        "flex min-h-11 items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-sm leading-tight transition-colors",
+                        ok
+                          ? "border-input bg-background hover:bg-accent"
+                          : "border-destructive/40 bg-destructive-soft text-destructive",
+                      )}
+                    >
+                      {ok ? (
+                        <Check className="size-4 shrink-0 text-emerald-600" strokeWidth={2.5} />
+                      ) : (
+                        <X className="size-4 shrink-0" strokeWidth={2.5} />
+                      )}
+                      <span className="min-w-0 flex-1 leading-tight">
+                        <span className="flex items-start gap-1.5">
+                          <i
+                            className={cn("mt-1.5 size-2 shrink-0 rounded-full", v.gender === "Feminino" ? "bg-rose-500" : "bg-sky-600")}
                           />
-                          <span className="min-w-0 flex-1 truncate">{v.name}</span>
-                          {v.observation && <StickyNote className="size-3 shrink-0 text-amber-600" aria-label="Tem observação" />}
-                          {v.faltas > 0 && <span className="text-[11px] text-muted-foreground no-underline">{v.faltas}</span>}
-                        </button>
+                          <span className={cn("line-clamp-2 break-words", !ok && "font-medium")}>{v.name}</span>
+                        </span>
+                        {!ok && <span className="block text-xs">faltou</span>}
+                      </span>
+                      {v.observation && <StickyNote className="size-3.5 shrink-0 text-amber-600" aria-label="Tem recado" />}
+                    </button>
+                  );
+                })}
+                {!filteredVols.length && (
+                  <p className="col-span-full py-4 text-center text-sm text-muted-foreground">Ninguém com esse nome.</p>
+                )}
+              </div>
+
+              {absentVols.length > 0 && (
+                <div className="mt-4 rounded-lg border border-destructive/20 bg-destructive-soft/40 p-3">
+                  <div className="mb-2 text-sm font-semibold text-destructive">
+                    Por que faltou? <span className="font-normal text-muted-foreground">(opcional — fica guardado no histórico)</span>
+                  </div>
+                  <datalist id="motivos-falta">
+                    {MOTIVOS.map((m) => (
+                      <option key={m} value={m} />
+                    ))}
+                  </datalist>
+                  <div className="grid grid-cols-[repeat(auto-fill,minmax(min(320px,100%),1fr))] gap-x-4 gap-y-2">
+                    {absentVols.map((v) => (
+                      <label key={v.id} className="flex items-center gap-2 text-sm">
+                        <span className="w-28 shrink-0 truncate font-medium md:w-36">{v.name}</span>
+                        <Input
+                          list="motivos-falta"
+                          value={reasons[v.id] ?? ""}
+                          onChange={(e) => setReason(v.id, e.target.value)}
+                          placeholder="Ex.: doente, viagem, trabalho"
+                          maxLength={200}
+                          className="bg-background"
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {notes.length > 0 && (
+                <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50/70 p-3">
+                  <div className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold text-amber-900">
+                    <StickyNote className="size-4" /> Recados dos voluntários
+                  </div>
+                  <ul className="space-y-1 text-sm text-amber-950">
+                    {notes.map((v) => (
+                      <li key={v.id}>
+                        <b className="font-medium">{v.name}:</b> {v.observation}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </Card>
+        </Step>
+
+        {/* ------------------------------------------------ 3. gerar */}
+        <Step
+          n={3}
+          title="Fazer a escala"
+          hint={
+            hasSchedule
+              ? "A escala já está feita e salva. Mudou quem veio? Faça de novo (as trocas feitas à mão serão perdidas)."
+              : "O sistema coloca quem veio nas posições, seguindo as regras. Você pode trocar qualquer pessoa depois."
+          }
+          className="no-print"
+        >
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <Button
+              size="lg"
+              variant={hasSchedule ? "outline" : "default"}
+              className="max-sm:w-full"
+              onClick={() => (hasSchedule ? setConfirmGen(true) : generate())}
+              disabled={generating}
+            >
+              {generating ? <Loader2 className="animate-spin" /> : hasSchedule ? <RotateCcw /> : <Sparkles />}
+              {generating ? "Fazendo a escala…" : hasSchedule ? "Fazer de novo" : "Fazer a escala"}
+            </Button>
+            <button
+              onClick={openPositions}
+              className="flex items-center gap-1.5 text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+            >
+              <Settings2 className="size-4" /> Ligar ou desligar posições ({active.size} ligadas)
+            </button>
+          </div>
+        </Step>
+
+        {/* ------------------------------------------------ 4. conferir */}
+        <Step
+          n={4}
+          title="Confira e troque"
+          hint={
+            hasSchedule
+              ? "Toque num nome para trocar a pessoa. Cada troca é salva sozinha."
+              : "A escala aparece aqui depois do passo 3."
+          }
+          muted={!hasSchedule}
+        >
+          {hasSchedule && (
+            <>
+              <div className="no-print space-y-2">
+                {outsideMap.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-3 rounded-lg border border-sky-300 bg-sky-50 px-3.5 py-2.5 text-sm text-sky-950">
+                    <Users className="size-4 shrink-0" />
+                    <span className="min-w-0 flex-1 basis-52">
+                      <b>
+                        {outsideMap.length} {outsideMap.length === 1 ? "pessoa que veio ainda está" : "pessoas que vieram ainda estão"} sem
+                        lugar:
+                      </b>{" "}
+                      {outsideMap.map((v) => v.name).join(", ")}.
+                    </span>
+                    <Button size="sm" onClick={fitReception}>
+                      Colocar na recepção
+                    </Button>
+                  </div>
+                )}
+                {issues.length > 0 && (
+                  <div className="rounded-lg border border-destructive/25 bg-destructive-soft px-3.5 py-2.5 text-sm text-destructive">
+                    <div className="flex items-center gap-2 font-semibold">
+                      <CircleAlert className="size-4 shrink-0" /> Atenção: {issues.length}{" "}
+                      {issues.length === 1 ? "problema" : "problemas"} na escala (as posições com problema estão em vermelho)
+                    </div>
+                    <ul className="mt-1 ml-6 list-disc space-y-0.5">
+                      {issues.map((i, k) => (
+                        <li key={k}>{i.message}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {warnings.length > 0 && (
+                  <div className="rounded-lg border border-warning/40 bg-warning-soft px-3.5 py-2.5 text-sm text-[oklch(0.42_0.1_70)]">
+                    <div className="font-semibold">Observações sobre a escala</div>
+                    <ul className="mt-1 ml-5 list-disc space-y-0.5">
+                      {warnings.map((w, k) => (
+                        <li key={k}>{w}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+
+              {/* Na tela a lista vem antes; na impressão o mapa continua na primeira página. */}
+              <div className="flex flex-col gap-4">
+                <Card className="@container overflow-hidden print:order-2 print-break">
+                  <CardHeader>
+                    <CardTitle>Lista de posições</CardTitle>
+                    <span className="no-print text-xs text-muted-foreground">toque num nome para trocar</span>
+                  </CardHeader>
+                  <div className="grid gap-x-6 gap-y-5 p-3 md:p-4 @3xl:grid-cols-2">
+                    {[
+                      ...FICHA,
+                      { side: "rec" as const, title: "Recepção", groups: [["Recepção", recCodes] as [string, string[]]] },
+                    ].map((sec) => {
+                      const t = MOMENT[sec.side];
+                      // só as posições ligadas: as desligadas ficam no mapa e em "Ligar ou desligar posições"
+                      const groups = sec.groups
+                        .map(([label, codes]) => {
+                          const all = codes.filter((c) => positions[c]);
+                          return { label, all, shown: all.filter((c) => active.has(c)) };
+                        })
+                        .filter((g) => g.shown.length);
+                      if (!groups.length) return null;
+                      return (
+                        <section key={sec.side} className={cn("@container/sec", sec.side === "rec" && "@3xl:col-span-2")}>
+                          <div className={cn("mb-3 rounded-md px-3 py-2 text-white", t.header)}>
+                            <div className="text-sm font-bold tracking-wide uppercase">{t.title}</div>
+                            <div className="text-xs opacity-90">{momentNote(sec.side, !!day.last_sunday)}</div>
+                          </div>
+                          <div className="space-y-4">
+                            {groups.map(({ label, all, shown }) => (
+                              <div key={label}>
+                                {sec.side !== "rec" && (
+                                  <div className={cn("mb-1.5 flex items-center gap-2 border-l-[3px] pl-2", t.labelBar)}>
+                                    <span className={cn("text-sm font-bold", t.label)}>{label}</span>
+                                    <span className="text-xs text-muted-foreground tabular-nums">
+                                      {shown.filter((c) => assign[c]).length} de {shown.length}
+                                    </span>
+                                  </div>
+                                )}
+                                <div
+                                  className={cn(
+                                    "grid grid-cols-2 gap-1.5 @[640px]/sec:grid-cols-3 @[900px]/sec:grid-cols-4",
+                                    sec.side === "rec" && "@[1150px]/sec:grid-cols-5",
+                                  )}
+                                >
+                                  {shown.map((c) => {
+                                    const vid = assign[c];
+                                    const name = vid ? vols[vid]?.name : "";
+                                    return (
+                                      <button
+                                        key={c}
+                                        data-code={c}
+                                        onClick={(e) => openSlot(c, e.currentTarget)}
+                                        className={cn(
+                                          "flex h-11 min-w-0 items-center gap-1.5 rounded-lg border px-2 text-left text-sm transition-[border-color,background-color] md:h-10",
+                                          !name && cn("border-dashed", t.empty),
+                                          name && t.slot,
+                                          bad.has(c) && "border-destructive bg-destructive-soft text-destructive",
+                                        )}
+                                      >
+                                        <span className={cn("w-5 shrink-0 text-right text-xs font-semibold tabular-nums", t.num)}>
+                                          {all.indexOf(c) + 1}
+                                        </span>
+                                        <span className={cn("min-w-0 flex-1 truncate", name ? "font-semibold" : "italic")}>
+                                          {name || "escolher pessoa"}
+                                        </span>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </section>
                       );
                     })}
                   </div>
-                  {absentVols.length > 0 && (
-                    <div className="mt-3 rounded-md border border-destructive/20 bg-destructive-soft/40 p-2.5">
-                      <div className="mb-1.5 text-xs font-semibold text-destructive">
-                        Motivo da falta <span className="font-normal text-muted-foreground">· opcional, fica no histórico</span>
-                      </div>
-                      <datalist id="motivos-falta">
-                        {MOTIVOS.map((m) => (
-                          <option key={m} value={m} />
-                        ))}
-                      </datalist>
-                      <div className="grid grid-cols-[repeat(auto-fill,minmax(min(300px,100%),1fr))] gap-x-3 gap-y-1">
-                        {absentVols.map((v) => (
-                          <label key={v.id} className="flex items-center gap-2 text-[13px]">
-                            <span className="w-24 shrink-0 truncate font-medium md:w-32" title={v.name}>
-                              {v.name}
-                            </span>
-                            <Input
-                              list="motivos-falta"
-                              value={reasons[v.id] ?? ""}
-                              onChange={(e) => setReason(v.id, e.target.value)}
-                              placeholder="Ex.: doente, viagem, trabalho"
-                              maxLength={200}
-                              className="h-9 bg-background text-[13px] md:h-7"
-                            />
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </Card>
+                  <div className="no-print border-t px-3 py-2.5 text-sm text-muted-foreground md:px-4">
+                    Faltou ou sobrou alguma posição?{" "}
+                    <button onClick={openPositions} className="font-medium text-foreground underline underline-offset-4">
+                      Ligar ou desligar posições
+                    </button>
+                  </div>
+                </Card>
 
-        {/* ------------------------------------------------ alertas */}
-        <div className="no-print space-y-2">
-          {outsideMap.length > 0 && (
-            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-sky-300 bg-sky-50 px-3.5 py-2 text-[13px] text-sky-950">
-              <Users className="size-4 shrink-0" />
-              <span className="min-w-0 flex-1 basis-52">
-                <b>{outsideMap.length}</b> pessoa(s) fora do mapa: {outsideMap.map((v) => v.name).join(", ")}.
-              </span>
-              <Button size="sm" onClick={fitReception}>
-                Encaixar na recepção
-              </Button>
-            </div>
-          )}
-          {issues.length > 0 && (
-            <div className="rounded-lg border border-destructive/25 bg-destructive-soft px-3.5 py-2.5 text-[13px] text-destructive">
-              <div className="flex items-center gap-2 font-semibold">
-                <CircleAlert className="size-4" /> {issues.length} regra(s) quebrada(s) — posições em vermelho
+                <Card className="overflow-hidden print:order-1">
+                  <CardHeader className="no-print">
+                    <CardTitle>
+                      A mesma escala, no desenho do templo
+                      <span className="text-xs font-normal text-muted-foreground md:hidden">· arraste para os lados</span>
+                    </CardTitle>
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                      <Legend className="border border-dashed border-neutral-400 bg-white" label="vaga vazia" />
+                      <Legend className="bg-neutral-300" label="desligada (toque para ligar)" />
+                      <Legend className="bg-red-600" label="problema" />
+                    </div>
+                  </CardHeader>
+                  <div className="overflow-x-auto">
+                    <div
+                      className="p-3 max-md:w-[1000px] [&_svg]:h-auto [&_svg]:w-full"
+                      onClick={(e) => {
+                        const g = (e.target as Element).closest(".slot");
+                        if (g) openSlot(g.getAttribute("data-code")!, g);
+                      }}
+                      dangerouslySetInnerHTML={{ __html: svg }}
+                    />
+                  </div>
+                </Card>
               </div>
-              <ul className="mt-1 ml-6 list-disc space-y-0.5">
-                {issues.map((i, k) => (
-                  <li key={k}>{i.message}</li>
-                ))}
-              </ul>
-            </div>
+            </>
           )}
-          {warnings.length > 0 && (
-            <details className="rounded-lg border border-warning/40 bg-warning-soft px-3.5 py-2 text-[13px] text-[oklch(0.42_0.1_70)]">
-              <summary className="cursor-pointer font-medium">{warnings.length} aviso(s) da geração</summary>
-              <ul className="mt-1 ml-5 list-disc space-y-0.5">
-                {warnings.map((w, k) => (
-                  <li key={k}>{w}</li>
-                ))}
-              </ul>
-            </details>
-          )}
-          {day && !hasSchedule && (
-            <div className="flex items-center gap-2 rounded-lg border bg-card px-3.5 py-2.5 text-[13px]">
-              <Sparkles className="size-4" />
-              Marque as faltas e clique em <b>Gerar escala</b>. Depois clique em qualquer nome para trocar — tudo é salvo
-              automaticamente.
-            </div>
-          )}
-        </div>
-
-        {/* ------------------------------------------------ mapa + ficha */}
-        <div className="grid items-start gap-3 min-[1700px]:grid-cols-[minmax(0,1fr)_440px]">
-          {/* No celular a ficha vem antes (é legível de cara) e o mapa fica num tamanho fixo, de arrastar. */}
-          <Card className="overflow-hidden max-md:order-2">
-            <CardHeader className="no-print">
-              <CardTitle>
-                Mapa do templo <span className="text-xs font-normal text-muted-foreground md:hidden">· arraste para os lados</span>
-              </CardTitle>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                <Legend className="border border-dashed border-neutral-400 bg-white" label="vazio" />
-                <Legend className="bg-neutral-300" label="desativada · clique para ativar" />
-                <Legend className="bg-red-600" label="regra quebrada" />
-              </div>
-            </CardHeader>
-            <div className="overflow-x-auto">
-              <div
-                className="p-3 max-md:w-[1000px] [&_svg]:h-auto [&_svg]:w-full"
-                onClick={(e) => {
-                  const g = (e.target as Element).closest(".slot");
-                  if (g) openSlot(g.getAttribute("data-code")!, g);
-                }}
-                dangerouslySetInnerHTML={{ __html: svg }}
-              />
-            </div>
-          </Card>
-
-          <Card className="print-break @container overflow-hidden max-md:order-1">
-            <CardHeader>
-              <CardTitle>Ficha posicional</CardTitle>
-              <span className="text-xs text-muted-foreground">clique para trocar</span>
-            </CardHeader>
-            <div className="grid gap-x-5 gap-y-4 p-3 @2xl:grid-cols-2">
-              {[
-                ...FICHA,
-                {
-                  side: "rec" as const,
-                  title: "Recepção",
-                  groups: [["Recepção", recVisible] as [string, string[]]],
-                },
-              ].map((sec) => {
-                const t = MOMENT[sec.side];
-                return (
-                  <section key={sec.side} className={cn(sec.side === "rec" && "@2xl:col-span-2")}>
-                    <div className={cn("mb-2.5 flex items-center justify-between rounded-md px-3 py-2 text-white", t.header)}>
-                      <span className="text-[13px] font-bold tracking-wide uppercase">{t.title}</span>
-                      <span className="text-xs opacity-90">
-                        {sec.side === "in"
-                          ? "recepção não pode"
-                          : sec.side === "out"
-                            ? day?.last_sunday
-                              ? "último domingo: recepção não pode"
-                              : ""
-                            : day?.last_sunday
-                              ? "último domingo: só recepção"
-                              : "não fica na entrada"}
-                      </span>
-                    </div>
-                    <div className="space-y-3">
-                      {sec.groups.map(([label, codes]) => {
-                        const list = codes.filter((c) => positions[c]);
-                        const filled = list.filter((c) => assign[c]).length;
-                        return (
-                          <div key={label}>
-                            {sec.side !== "rec" && (
-                              <div className={cn("mb-1.5 flex items-center gap-2 border-l-[3px] pl-2", t.labelBar)}>
-                                <span className={cn("text-sm font-bold", t.label)}>{label}</span>
-                                <span className="text-xs text-muted-foreground tabular-nums">
-                                  {filled}/{list.filter((c) => active.has(c)).length}
-                                </span>
-                              </div>
-                            )}
-                            <div
-                              className={cn(
-                                // duas colunas enquanto a ficha é estreita (celular), para o nome caber
-                                "grid grid-cols-2 gap-1 @[420px]:grid-cols-3 @5xl:grid-cols-4",
-                                sec.side === "rec" && "@[420px]:grid-cols-4 @3xl:grid-cols-5",
-                              )}
-                            >
-                              {list.map((c, i) => {
-                                const on = active.has(c);
-                                const vid = assign[c];
-                                const name = vid ? vols[vid]?.name : "";
-                                return (
-                                  <button
-                                    key={c}
-                                    data-code={c}
-                                    onClick={(e) => openSlot(c, e.currentTarget)}
-                                    className={cn(
-                                      "group flex h-10 min-w-0 items-center gap-1.5 rounded-md border px-2 text-left text-[13px] transition-[border-color,background-color] md:h-8",
-                                      !on && "border-dashed border-input bg-background text-muted-foreground/70 hover:text-foreground",
-                                      on && !name && cn("border-dashed", t.empty),
-                                      on && name && t.slot,
-                                      bad.has(c) && "border-destructive bg-destructive-soft text-destructive",
-                                    )}
-                                  >
-                                    <span className={cn("w-4 shrink-0 text-right text-[11px] font-semibold tabular-nums", t.num)}>
-                                      {i + 1}
-                                    </span>
-                                    <span className={cn("min-w-0 flex-1 truncate", name && "font-semibold")}>
-                                      {!on ? "+ ativar" : name || "vazio"}
-                                    </span>
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </section>
-                );
-              })}
-            </div>
-          </Card>
-        </div>
+        </Step>
       </div>
 
       <PersonPicker
@@ -749,7 +798,7 @@ Obs.: ${v.observation}` : ""}`}
             if (!day) return;
             const r = await api.setTeamPositions(day.team, [...active]);
             setDefaults(r.codes);
-            toast.success("Posições salvas como padrão para os próximos cultos desta equipe.");
+            toast.success("Guardado: os próximos cultos desta equipe começam com estas posições.");
           } catch (e) {
             toast.error((e as Error).message);
           }
@@ -758,12 +807,54 @@ Obs.: ${v.observation}` : ""}`}
       <Confirm
         open={confirmGen}
         onOpenChange={setConfirmGen}
-        title="Gerar a escala de novo?"
-        description="A escala atual, inclusive as trocas feitas à mão, será substituída por uma nova sugestão."
-        confirmLabel="Gerar de novo"
+        title="Fazer a escala de novo?"
+        description="A escala atual, com as trocas feitas à mão, será substituída por uma nova."
+        confirmLabel="Fazer de novo"
         onConfirm={generate}
       />
     </div>
+  );
+}
+
+/** "Quarta-Feira" -> "Quarta-feira" */
+const weekday = (w: string) => w.replace("-Feira", "-feira");
+
+/** Lembrete da regra de cada momento, em palavras simples. */
+function momentNote(side: "in" | "out" | "rec", lastSunday: boolean) {
+  if (side === "in") return "quem está na recepção não faz entrada";
+  if (side === "out") return lastSunday ? "último domingo: quem está na recepção não faz saída" : "pode ser feita por quem está na recepção";
+  return lastSunday ? "último domingo: quem está aqui fica só na recepção" : "quem está aqui não faz entrada";
+}
+
+/** Um passo da tela: número, título, o que fazer e o conteúdo. */
+function Step({
+  n,
+  title,
+  hint,
+  muted,
+  className,
+  children,
+}: {
+  n: number;
+  title: string;
+  hint: React.ReactNode;
+  muted?: boolean;
+  className?: string;
+  children?: React.ReactNode;
+}) {
+  return (
+    <section className={cn("space-y-3", className)} aria-label={`Passo ${n}: ${title}`}>
+      <div className={cn("no-print flex items-start gap-3", muted && "opacity-60")}>
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-base font-bold text-primary-foreground tabular-nums">
+          {n}
+        </span>
+        <div className="min-w-0 pt-0.5">
+          <h2 className="text-lg leading-tight font-semibold">{title}</h2>
+          <p className="mt-0.5 text-sm text-muted-foreground">{hint}</p>
+        </div>
+      </div>
+      {children}
+    </section>
   );
 }
 
@@ -818,28 +909,24 @@ function Legend({ className, label }: { className: string; label: string }) {
 }
 
 function SaveIndicator({ state }: { state: SaveState }) {
-  const base = "flex h-4 items-center gap-1 text-xs leading-none whitespace-nowrap";
-  if (state.kind === "idle") return <span className={cn(base, "text-muted-foreground")}>Ainda não gerada</span>;
+  const base = "flex min-h-5 items-center gap-1 text-xs leading-tight";
+  if (state.kind === "idle") return <span className={cn(base, "text-muted-foreground")}>Escala ainda não feita</span>;
   if (state.kind === "pending" || state.kind === "saving")
     return (
       <span className={cn(base, "text-muted-foreground")}>
-        <Loader2 className="size-3 animate-spin" /> Salvando…
+        <Loader2 className="size-3 shrink-0 animate-spin" /> Salvando…
       </span>
     );
   if (state.kind === "error")
     return (
-      <Tooltip content={state.msg}>
-        <span className={cn(base, "text-destructive")}>
-          <CircleAlert className="size-3" /> Erro ao salvar
-        </span>
-      </Tooltip>
+      // a mensagem fica escrita: a pessoa precisa saber que a última mudança não foi guardada
+      <span className={cn(base, "text-destructive")} title={state.msg}>
+        <CircleAlert className="size-3 shrink-0" /> Não foi possível salvar. Confira a internet e faça a mudança de novo.
+      </span>
     );
   return (
-    <Tooltip content="Escala salva.">
-      <span className={cn(base, "text-emerald-700")}>
-        <Check className="size-3" />
-        Salvo às {state.at}
-      </span>
-    </Tooltip>
+    <span className={cn(base, "text-emerald-700")}>
+      <Check className="size-3 shrink-0" /> Tudo salvo às {state.at}
+    </span>
   );
 }

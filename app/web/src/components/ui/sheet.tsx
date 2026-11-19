@@ -28,7 +28,7 @@ export function SheetContent({
           <div>
             <DialogPrimitive.Title className="text-base font-semibold">{title}</DialogPrimitive.Title>
             {description ? (
-              <DialogPrimitive.Description className="mt-0.5 text-[13px] text-muted-foreground">{description}</DialogPrimitive.Description>
+              <DialogPrimitive.Description className="mt-0.5 text-sm text-muted-foreground">{description}</DialogPrimitive.Description>
             ) : (
               <DialogPrimitive.Description className="sr-only">{String(title)}</DialogPrimitive.Description>
             )}

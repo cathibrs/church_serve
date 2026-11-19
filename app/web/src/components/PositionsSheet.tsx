@@ -70,20 +70,20 @@ export function PositionsSheet({
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
-        title="Posições do culto"
-        description={`${active.size} de ${total} posições ativas. Clique para ativar ou desativar.`}
+        title="Ligar ou desligar posições"
+        description={`Só as posições ligadas recebem gente na escala. ${active.size} de ${total} estão ligadas. Toque num número para ligar ou desligar.`}
         className="max-w-lg"
       >
-        <div className="flex items-center gap-2 border-b px-5 py-2.5">
-          <Button size="xs" variant="outline" onClick={() => onChange(new Set(defaults))}>
-            <RotateCcw /> Padrão
+        <div className="flex flex-wrap items-center gap-2 border-b px-5 py-2.5">
+          <Button size="sm" variant="outline" onClick={() => onChange(new Set(defaults))}>
+            <RotateCcw /> Voltar ao padrão
           </Button>
-          <Button size="xs" variant="outline" onClick={() => onChange(new Set(Object.keys(positions)))}>
-            Todas
+          <Button size="sm" variant="outline" onClick={() => onChange(new Set(Object.keys(positions)))}>
+            Ligar todas
           </Button>
           <div className="flex-1" />
-          <Button size="xs" variant="secondary" onClick={onSaveDefault}>
-            <Save /> Usar como padrão
+          <Button size="sm" variant="secondary" onClick={onSaveDefault}>
+            <Save /> Guardar como padrão da equipe
           </Button>
         </div>
         <div className="flex-1 space-y-5 overflow-y-auto px-5 py-4">
@@ -97,7 +97,7 @@ export function PositionsSheet({
                   return (
                     <div key={g.title} className="rounded-lg border p-2.5">
                       <div className="mb-2 flex items-center justify-between">
-                        <span className="text-[13px] font-medium">
+                        <span className="text-sm font-medium">
                           {g.title} <span className="font-normal text-muted-foreground">· {on}/{codes.length}</span>
                         </span>
                         <Switch checked={on === codes.length} onCheckedChange={(v) => toggle(codes, v)} />
@@ -111,7 +111,7 @@ export function PositionsSheet({
                               title={positions[c].name}
                               onClick={() => toggle([c], !isOn)}
                               className={cn(
-                                "flex h-7 min-w-9 items-center justify-center gap-1 rounded-md border px-2 text-xs font-medium transition-colors",
+                                "flex h-9 min-w-10 items-center justify-center gap-1 rounded-md border px-2 text-xs font-medium transition-colors",
                                 isOn
                                   ? "border-primary bg-primary text-primary-foreground"
                                   : "border-dashed border-input text-muted-foreground hover:border-ring hover:text-foreground",

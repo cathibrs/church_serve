@@ -169,19 +169,19 @@ export function LoginPage({
       <div className="w-full max-w-sm">
         <div className="mb-5 flex flex-col items-center">
           <img src="/logo.png" alt="Lagoinha Jundiaí" className="w-36 mix-blend-screen select-none" draggable={false} />
-          <div className="mt-1 text-[11px] font-semibold tracking-[0.22em] text-white/70 uppercase">
+          <div className="mt-1 text-xs font-semibold tracking-[0.22em] text-white/70 uppercase">
             Escala de voluntários
           </div>
         </div>
         <form onSubmit={onSubmit} className="flex flex-col gap-4 rounded-xl border bg-card p-6 text-card-foreground shadow-lg">
           <div>
             <h1 className="text-lg font-semibold tracking-tight">{title}</h1>
-            <p className="mt-1 text-[13px] text-muted-foreground">
+            <p className="mt-1 text-sm text-muted-foreground">
               {step === "codigo" || step === "nova-senha" ? `${hint} Destino: ${address}.` : hint}
             </p>
           </div>
 
-          {note && <p className="rounded-md bg-success-soft px-3 py-2 text-[13px] text-emerald-800">{note}</p>}
+          {note && <p className="rounded-md bg-success-soft px-3 py-2 text-sm text-emerald-800">{note}</p>}
 
           {(step === "entrar" || step === "esqueci") && emailField}
           {(step === "codigo" || step === "nova-senha") && codeField}
@@ -189,7 +189,7 @@ export function LoginPage({
           {step === "nova-senha" && passwordField("Nova senha (mínimo de 8 caracteres)", true)}
 
           {error && (
-            <p role="alert" className="rounded-md bg-destructive-soft px-3 py-2 text-[13px] text-destructive">
+            <p role="alert" className="rounded-md bg-destructive-soft px-3 py-2 text-sm text-destructive">
               {error}
             </p>
           )}
@@ -202,7 +202,7 @@ export function LoginPage({
             {step === "nova-senha" && "Salvar nova senha"}
           </Button>
 
-          <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 text-[13px]">
+          <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 text-sm">
             {step === "entrar" && <LinkButton onClick={() => go("esqueci")}>Esqueci a senha</LinkButton>}
             {step === "esqueci" && <LinkButton onClick={() => go("entrar")}>Voltar para o login</LinkButton>}
             {step === "codigo" && (
@@ -256,7 +256,7 @@ export function AccessNotice({ title, children, action }: { title: string; child
     <div className="flex h-full items-center justify-center overflow-auto bg-sidebar p-4">
       <div className="flex w-full max-w-sm flex-col gap-3 rounded-xl border bg-card p-6 text-card-foreground shadow-lg">
         <h1 className="text-lg font-semibold tracking-tight">{title}</h1>
-        <div className="text-[13px] leading-relaxed text-muted-foreground">{children}</div>
+        <div className="text-sm leading-relaxed text-muted-foreground">{children}</div>
         {action}
       </div>
     </div>

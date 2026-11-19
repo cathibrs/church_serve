@@ -90,7 +90,7 @@ export function MobileNav(menu: MenuProps) {
           <Menu className="size-5" />
         </Dialog.Trigger>
         <img src="/logo-mark.png" alt="Lagoinha Jundiaí" className="size-7 mix-blend-screen select-none" draggable={false} />
-        <span className="truncate text-[11px] font-semibold tracking-[0.22em] text-white/70 uppercase">Escala de voluntários</span>
+        <span className="truncate text-xs font-semibold tracking-[0.22em] text-white/70 uppercase">Escala de voluntários</span>
       </header>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 lg:hidden" />
@@ -162,7 +162,7 @@ function SidebarBody({
               className="flex flex-col items-center"
             >
               <img src="/logo.png" alt="Lagoinha Jundiaí" className="w-[136px] mix-blend-screen select-none" draggable={false} />
-              <div className="mt-1 text-[11px] font-semibold tracking-[0.22em] whitespace-nowrap text-white/70 uppercase">
+              <div className="mt-1 text-xs font-semibold tracking-[0.22em] whitespace-nowrap text-white/70 uppercase">
                 Escala de voluntários
               </div>
             </motion.div>
@@ -242,7 +242,7 @@ function SidebarBody({
         <SideAction collapsed={collapsed} icon={Lock} label="Alterar senha" onClick={onChangePassword} />
         <SideAction collapsed={collapsed} icon={LogOut} label="Sair" onClick={onSignOut} />
         {!collapsed && (
-          <div className="mt-1 px-3 text-[11px] text-white/45">
+          <div className="mt-1 px-3 text-xs text-white/45">
             <div className="truncate" title={userEmail}>
               {userEmail}
             </div>
@@ -272,7 +272,7 @@ function SideAction({
       onClick={onClick}
       aria-label={label}
       className={cn(
-        "flex items-center rounded-lg text-[13px] text-white/80 transition-colors hover:bg-sidebar-accent hover:text-white",
+        "flex items-center rounded-lg text-sm text-white/80 transition-colors hover:bg-sidebar-accent hover:text-white",
         collapsed ? "size-11 justify-center" : "w-full gap-3 px-3 py-2",
       )}
     >
@@ -280,7 +280,7 @@ function SideAction({
       {!collapsed && (
         <>
           <span className="whitespace-nowrap">{label}</span>
-          {hint && <kbd className="ml-auto rounded border border-white/20 px-1.5 text-[11px] text-white/55">{hint}</kbd>}
+          {hint && <kbd className="ml-auto rounded border border-white/20 px-1.5 text-xs text-white/55">{hint}</kbd>}
         </>
       )}
     </button>
