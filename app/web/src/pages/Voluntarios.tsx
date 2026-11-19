@@ -20,6 +20,7 @@ import {
 import {
   api,
   canEditVolunteers,
+  isEventTeam,
   type Me,
   type SavedVolunteer,
   type Volunteer,
@@ -81,6 +82,9 @@ const EMPTY: Partial<Volunteer> = {
   can_limpar_altar: true,
   observation: "",
 };
+
+/** Equipes em que se cadastra gente: Eventos fica de fora, porque junta todos os voluntários. */
+const volunteerTeams = (me: Me) => me.teams.filter((t) => !isEventTeam(t));
 
 export function VoluntariosPage({
   me,
@@ -201,7 +205,7 @@ export function VoluntariosPage({
           </p>
         </div>
         {editable && (
-          <Button onClick={() => setEdit({ ...EMPTY, team: team !== "all" ? team : (me.teams[0] ?? "") })}>
+          <Button onClick={() => setEdit({ ...EMPTY, team: team !== "all" ? team : (volunteerTeams(me)[0] ?? "") })}>
             <Plus /> Novo voluntário
           </Button>
         )}
@@ -228,7 +232,7 @@ export function VoluntariosPage({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todas as equipes</SelectItem>
-              {me.teams.map((t) => (
+              {volunteerTeams(me).map((t) => (
                 <SelectItem key={t} value={t}>
                   {teamLabel(t)}
                 </SelectItem>
@@ -495,7 +499,7 @@ function VolunteerSheet({
   onClose: () => void;
   onSaved: (saved: SavedVolunteer) => void;
 }) {
-  const teams = me.teams;
+  const teams = volunteerTeams(me);
   const [f, setF] = useState<Partial<Volunteer>>(EMPTY);
   useEffect(() => {
     if (value) setF(value);

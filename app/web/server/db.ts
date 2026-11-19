@@ -6,7 +6,7 @@
  * (Promise.all), porque cada uma é uma ida ao banco pela rede.
  */
 import { neon } from "@neondatabase/serverless";
-import { POSITIONS, TEAM_OPTIONS } from "./config.ts";
+import { EVENT_TEAM, POSITIONS, TEAM_OPTIONS } from "./config.ts";
 import type { Assignment, HistoryStats, Position, Volunteer } from "./models.ts";
 
 type Row = Record<string, any>;
@@ -153,9 +153,9 @@ export interface RosterVolunteer extends Volunteer {
   faltas: number;
 }
 
-/** Equipe de um culto: todos (ativos e inativos) da equipe, com as faltas de cada um. */
-export async function getRoster(sql: Sql, team: string): Promise<RosterVolunteer[]> {
-  const rows = await sql.query(`SELECT v.*, ${FALTAS} FROM volunteers v WHERE ${VOLUNTEER_SCOPE}`, volunteerScope(false, [team]));
+/** Equipe de um culto: todos (ativos e inativos) dessas equipes, com as faltas de cada um. null = todos (evento). */
+export async function getRoster(sql: Sql, teams: Teams): Promise<RosterVolunteer[]> {
+  const rows = await sql.query(`SELECT v.*, ${FALTAS} FROM volunteers v WHERE ${VOLUNTEER_SCOPE}`, volunteerScope(false, teams));
   return sortByName(rows.map((r) => ({ ...volunteerFromRow(r), faltas: r.faltas })));
 }
 
@@ -193,9 +193,11 @@ export async function getVolunteersWithStats(sql: Sql, teams: Teams = null): Pro
   );
 }
 
+/** Equipes que existem: as dos voluntários e as fixas, e por último a dos eventos (que junta todos). */
 export async function getAvailableTeams(sql: Sql): Promise<string[]> {
   const rows = await sql`SELECT DISTINCT team FROM volunteers WHERE active AND team <> ''`;
-  return [...new Set([...rows.map((r) => r.team as string), ...TEAM_OPTIONS])].sort();
+  const teams = [...new Set([...rows.map((r) => r.team as string), ...TEAM_OPTIONS])].filter((t) => t !== EVENT_TEAM);
+  return [...teams.sort(), EVENT_TEAM];
 }
 
 /** Cadastro de um voluntário (null se o id não existe). */
@@ -398,6 +400,8 @@ export interface SavedSchedule {
   assignments: Assignment[];
   /** id de quem faltou -> motivo */
   absent: Map<number, string>;
+  /** quem estava presente (no evento, quem foi escolhido para servir) */
+  present: number[];
 }
 
 /**
@@ -405,7 +409,7 @@ export interface SavedSchedule {
  * as de itens e de faltas localizam a escala por conta própria, sem esperar a primeira.
  */
 export async function findSchedule(sql: Sql, serviceDate: string, team: string): Promise<SavedSchedule | null> {
-  const [found, items, absent] = await Promise.all([
+  const [found, items, people] = await Promise.all([
     sql`SELECT id, created_at, active_codes FROM schedules
         WHERE service_date = ${serviceDate} AND team = ${team} ORDER BY id DESC LIMIT 1`,
     sql`SELECT position_code, position_name, category, volunteer_id, volunteer_name, item_order
@@ -413,9 +417,10 @@ export async function findSchedule(sql: Sql, serviceDate: string, team: string):
         WHERE schedule_id = (SELECT id FROM schedules WHERE service_date = ${serviceDate} AND team = ${team}
                              ORDER BY id DESC LIMIT 1)
         ORDER BY item_order`,
-    sql`SELECT volunteer_id, justification FROM presence
-        WHERE absent AND schedule_id = (SELECT id FROM schedules WHERE service_date = ${serviceDate} AND team = ${team}
-                                        ORDER BY id DESC LIMIT 1)`,
+    sql`SELECT volunteer_id, absent, justification FROM presence
+        WHERE schedule_id = (SELECT id FROM schedules WHERE service_date = ${serviceDate} AND team = ${team}
+                             ORDER BY id DESC LIMIT 1)
+        ORDER BY volunteer_id`,
   ]);
   if (!found.length) return null;
   const s = found[0];
@@ -431,7 +436,8 @@ export async function findSchedule(sql: Sql, serviceDate: string, team: string):
       volunteer_name: r.volunteer_name,
       order: r.item_order,
     })),
-    absent: new Map(absent.map((r) => [r.volunteer_id as number, (r.justification as string) ?? ""])),
+    absent: new Map(people.filter((r) => r.absent).map((r) => [r.volunteer_id as number, (r.justification as string) ?? ""])),
+    present: people.filter((r) => !r.absent).map((r) => r.volunteer_id as number),
   };
 }
 
@@ -458,14 +464,32 @@ export async function listSchedules(sql: Sql, teams: Teams = null, limit = 200):
   return rows as unknown as ScheduleRow[];
 }
 
-/** Equipe da última escala salva nesse dia da semana (ou null). `teams` limita a busca a essas equipes. */
+/**
+ * Equipe da última escala salva nesse dia da semana (ou null). `teams` limita a busca a essas
+ * equipes. Eventos não entram: um evento num domingo não faz o domingo seguinte virar evento.
+ */
 export async function lastTeamFor(sql: Sql, serviceType: string, teams: Teams = null): Promise<string | null> {
   const rows = await sql`
     SELECT team FROM schedules
-    WHERE service_type = ${serviceType} AND team <> ''
+    WHERE service_type = ${serviceType} AND team <> '' AND team <> ${EVENT_TEAM}
       AND (${teams === null}::boolean OR team = ANY(${teams ?? []}::text[]))
     ORDER BY service_date DESC, id DESC LIMIT 1`;
   return rows[0]?.team ?? null;
+}
+
+/** Quem serviu no último evento antes dessa data (para repetir as mesmas pessoas), ou null. */
+export async function lastEventPeople(sql: Sql, beforeDate: string): Promise<{ date: string; ids: number[] } | null> {
+  const rows = await sql`
+    WITH last AS (
+      SELECT id, service_date FROM schedules
+      WHERE team = ${EVENT_TEAM} AND service_date < ${beforeDate}
+      ORDER BY service_date DESC, id DESC LIMIT 1
+    )
+    SELECT last.service_date, p.volunteer_id FROM last
+    LEFT JOIN presence p ON p.schedule_id = last.id AND NOT p.absent
+    ORDER BY p.volunteer_id`;
+  if (!rows.length) return null;
+  return { date: rows[0].service_date, ids: rows.filter((r) => r.volunteer_id !== null).map((r) => r.volunteer_id as number) };
 }
 
 // ---------------------------------------------------------------- histórico

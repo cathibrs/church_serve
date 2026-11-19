@@ -26,6 +26,16 @@ export const TEAM_OPTIONS = [
   "Quarta-Feira_Noite_B",
 ];
 
+/**
+ * Equipe dos eventos: junta todos os voluntários e ninguém é cadastrado nela. A cada evento
+ * se escolhe quem vai servir; quem não foi escolhido não ganha falta.
+ */
+export const EVENT_TEAM = "Eventos";
+
+/** Compara como as equipes no banco: sem maiúsculas, com espaço e hífen iguais a sublinhado. */
+export const isEventTeam = (team: string | null | undefined): boolean =>
+  (team ?? "").trim().toLowerCase().replace(/[- ]/g, "_") === EVENT_TEAM.toLowerCase();
+
 // Regras de quantidade
 export const ALTAR_SLOTS = 4; // Limpeza do altar: sempre 4 pessoas
 export const LIMPEZA_CONFETE_MAX = 8; // Limpeza do confete: no máximo 8 pessoas
@@ -155,3 +165,6 @@ export const POSITIONS: Position[] = [...DEFAULT_POSITIONS].sort((a, b) => (a.co
 
 /** Posições ligadas de fábrica: valem enquanto a equipe não guardar as suas. */
 export const FACTORY_ACTIVE: string[] = POSITIONS.filter((p) => p.normal_active && !p.event_only).map((p) => p.code);
+
+/** Posições ligadas de fábrica nos eventos: as normais e as que só abrem em evento. */
+export const EVENT_FACTORY_ACTIVE: string[] = POSITIONS.filter((p) => p.normal_active || p.event_only).map((p) => p.code);

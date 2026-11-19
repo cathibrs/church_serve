@@ -7,7 +7,7 @@
 import { clearToken, getToken } from "./auth";
 import type { Gender, Position } from "../../shared/catalog.ts";
 
-export { FACTORY_ACTIVE, POSITIONS } from "../../shared/catalog.ts";
+export { EVENT_TEAM, FACTORY_ACTIVE, isEventTeam, POSITIONS } from "../../shared/catalog.ts";
 export type { Gender, Position };
 
 export interface Volunteer {
@@ -154,10 +154,14 @@ export interface Sheet {
     assignments: Assignment[];
     absent_ids: number[];
     absent_reasons?: Record<string, string>;
+    /** quem estava presente (no evento, quem foi escolhido para servir) */
+    present_ids: number[];
     active_codes: string[] | null;
   };
   /** regras quebradas na escala salva */
   issues: Issue[];
+  /** só no evento: quem serviu no evento anterior, para repetir as mesmas pessoas */
+  last_event: null | { date: string; ids: number[] };
 }
 
 /** O que se envia para gravar a escala de um culto. */

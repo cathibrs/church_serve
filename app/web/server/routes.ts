@@ -33,7 +33,10 @@
 import { generatePassword, neonAccounts, type Accounts } from "./accounts.ts";
 import { authenticate, denied, HttpError, type AuthOptions, type AuthUser } from "./auth.ts";
 import {
+  EVENT_FACTORY_ACTIVE,
+  EVENT_TEAM,
   FACTORY_ACTIVE,
+  isEventTeam,
   isLastSunday,
   isoDate,
   localNow,
@@ -206,7 +209,10 @@ function checkTeam(user: AuthUser, team: string): string {
 /** Equipes de uma listagem: a do filtro (conferida) ou, sem filtro, todas as da pessoa. */
 const scopeOf = (user: AuthUser, team: string | undefined): db.Teams => (team ? [checkTeam(user, team)] : ownTeams(user));
 
-/** Equipe da última escala salva no mesmo dia da semana; senão, a padrão. Sempre uma equipe da pessoa. */
+/**
+ * Equipe da última escala salva no mesmo dia da semana; senão, a padrão. Sempre uma equipe da
+ * pessoa, e Eventos só quando ela não tem outra: o evento se escolhe de propósito.
+ */
 async function suggestTeam(sql: Sql, date: string, user: AuthUser): Promise<string> {
   const mine = ownTeams(user);
   const weekday = weekdayName(date);
@@ -214,28 +220,47 @@ async function suggestTeam(sql: Sql, date: string, user: AuthUser): Promise<stri
   if (last) return last;
   const fallback = teamForDate(date);
   if (mine === null || canUseTeam(user, fallback)) return fallback;
-  return mine.find((t) => t.startsWith(weekday)) ?? mine[0];
+  return mine.find((t) => t.startsWith(weekday)) ?? mine.find((t) => !isEventTeam(t)) ?? mine[0];
+}
+
+/** Quem pode entrar na escala da equipe: no evento, todos os voluntários (null). */
+const rosterTeams = (team: string): db.Teams => (isEventTeam(team) ? null : [team]);
+
+/** Ninguém é cadastrado em Eventos: a equipe junta todos e cada evento escolhe os seus. */
+function rejectEventTeam(team: unknown): void {
+  if (team !== undefined && team !== null && isEventTeam(String(team))) {
+    throw new UserError(`Ninguém é cadastrado na equipe ${EVENT_TEAM}: ela junta todos os voluntários.`);
+  }
 }
 
 const DEFAULT_POSITIONS_KEY = "posicoes_padrao";
 
-/** Posições ligadas por padrão: as da equipe, se ela guardou as suas; senão as gerais; senão as de fábrica. */
+/**
+ * Posições ligadas por padrão: as da equipe, se ela guardou as suas; senão as gerais; senão as
+ * de fábrica. Evento não usa as gerais (que são de culto): sem as suas, abre também as de evento.
+ */
 async function defaultActive(sql: Sql, team: string): Promise<string[]> {
-  const keys = [`${DEFAULT_POSITIONS_KEY}:${team}`, DEFAULT_POSITIONS_KEY];
+  const event = isEventTeam(team);
+  const own = `${DEFAULT_POSITIONS_KEY}:${team}`;
+  const keys = event ? [own] : [own, DEFAULT_POSITIONS_KEY];
   const saved = await db.getMetaMany(sql, keys);
   for (const key of keys) {
     const codes = saved.get(key);
     if (Array.isArray(codes) && codes.length) return codes.filter((c) => POSITION_BY_CODE.has(c));
   }
-  return FACTORY_ACTIVE;
+  return event ? EVENT_FACTORY_ACTIVE : FACTORY_ACTIVE;
 }
 
 // ====================================================================== regras da escala
 
-/** Regras quebradas na escala. `roster`: todos da equipe (ativos e inativos), já carregados. */
-function issuesOf(roster: Volunteer[], assignments: Assignment[], date: string, present: Set<number>): Issue[] {
+/**
+ * Regras quebradas na escala. `roster`: todos da equipe (ativos e inativos), já carregados.
+ * No evento quem não foi escolhido não faltou: só não foi chamado.
+ */
+function issuesOf(roster: Volunteer[], assignments: Assignment[], date: string, present: Set<number>, event = false): Issue[] {
   const vols = new Map(roster.map((v) => [v.id, v]));
-  const absent = present.size ? new Set([...vols.keys()].filter((id) => !present.has(id))) : new Set<number>();
+  const absent =
+    present.size && !event ? new Set([...vols.keys()].filter((id) => !present.has(id))) : new Set<number>();
   const mustPlace = new Set([...present].filter((id) => vols.get(id)?.active));
   return validate(assignments, vols, POSITION_BY_CODE, isLastSunday(date), absent, mustPlace);
 }
@@ -296,6 +321,7 @@ async function listVolunteers({ sql, user, query }: Ctx) {
 
 async function createVolunteer(ctx: Ctx) {
   const { sql, user, body } = ctx;
+  rejectEventTeam(body.team);
   if (ownTeams(user) !== null) {
     // coordenador só cadastra em equipe dele, e só se o admin não travou o cadastro
     checkTeam(user, db.cleanTeam(body.team));
@@ -314,6 +340,7 @@ async function createVolunteer(ctx: Ctx) {
 async function updateVolunteer(ctx: Ctx) {
   const { sql, user, params, body } = ctx;
   const id = idOf(params.id);
+  rejectEventTeam(body.team);
   if (ownTeams(user) !== null) {
     // coordenador só altera quem já é de uma equipe dele, e não manda ninguém para outra
     if (body.team !== undefined && body.team !== null) checkTeam(user, db.cleanTeam(body.team));
@@ -402,10 +429,12 @@ async function listSchedules({ sql, user, query }: Ctx) {
 async function getSheet({ sql, user, params }: Ctx) {
   const date = dateOf(params.date);
   const team = params.team ? checkTeam(user, params.team) : await suggestTeam(sql, date, user);
-  const [volunteers, schedule, active] = await Promise.all([
-    db.getRoster(sql, team),
+  const event = isEventTeam(team);
+  const [volunteers, schedule, active, lastEvent] = await Promise.all([
+    db.getRoster(sql, rosterTeams(team)),
     db.findSchedule(sql, date, team),
     defaultActive(sql, team),
+    event ? db.lastEventPeople(sql, date) : null,
   ]);
   let saved = null;
   let issues: Issue[] = [];
@@ -416,6 +445,7 @@ async function getSheet({ sql, user, params }: Ctx) {
       assignments: schedule.assignments,
       absent_ids: [...schedule.absent.keys()].sort((a, b) => a - b),
       absent_reasons: Object.fromEntries([...schedule.absent].filter(([, reason]) => reason).map(([id, r]) => [String(id), r])),
+      present_ids: schedule.present,
       active_codes: schedule.active_codes,
     };
     // confere a escala salva com o cadastro de hoje (alguém pode ter mudado de permissão ou saído)
@@ -424,8 +454,11 @@ async function getSheet({ sql, user, params }: Ctx) {
     const current = assignmentsOf(
       [...byCode.values()].map((a) => ({ ...a, volunteer_name: names.get(a.volunteer_id) ?? a.volunteer_name })),
     );
-    const present = new Set(volunteers.filter((v) => v.active && !schedule.absent.has(v.id)).map((v) => v.id));
-    issues = issuesOf(volunteers, current, date, present);
+    // no evento, presentes são só os escolhidos; no culto, todos os ativos menos quem faltou
+    const present = event
+      ? new Set(schedule.present)
+      : new Set(volunteers.filter((v) => v.active && !schedule.absent.has(v.id)).map((v) => v.id));
+    issues = issuesOf(volunteers, current, date, present, event);
   }
   return {
     date,
@@ -436,6 +469,8 @@ async function getSheet({ sql, user, params }: Ctx) {
     default_active: active,
     saved,
     issues,
+    // evento: quem serviu no anterior, para repetir as mesmas pessoas
+    last_event: lastEvent,
   };
 }
 
@@ -443,13 +478,19 @@ async function getSheet({ sql, user, params }: Ctx) {
 async function putSchedule({ sql, user, params, body }: Ctx) {
   const date = dateOf(params.date);
   const team = checkTeam(user, params.team);
+  const event = isEventTeam(team);
   const present = idSet(body.present_ids);
   const assignments = assignmentsOf(body.assignments ?? []);
   const reasons = new Map<number, string>();
-  for (const [id, reason] of Object.entries(body.absent_reasons ?? {})) {
-    if (reason) reasons.set(Number(id), String(reason));
+  if (event) {
+    // no evento, quem está na escala foi escolhido (e ninguém ganha falta)
+    for (const a of assignments) present.add(a.volunteer_id);
+  } else {
+    for (const [id, reason] of Object.entries(body.absent_reasons ?? {})) {
+      if (reason) reasons.set(Number(id), String(reason));
+    }
   }
-  const roster = await db.getVolunteers(sql, { activeOnly: false, teams: [team] });
+  const roster = await db.getVolunteers(sql, { activeOnly: false, teams: rosterTeams(team) });
   if (ownTeams(user) !== null) {
     // coordenador só escala e marca presença de gente da equipe dele
     const everyone = new Set(roster.map((v) => v.id));
@@ -462,11 +503,12 @@ async function putSchedule({ sql, user, params, body }: Ctx) {
     team,
     assignments,
     presentIds: present,
-    allVolunteerIds: roster.filter((v) => v.active).map((v) => v.id),
+    // evento: só os escolhidos entram na presença, então quem não foi chamado não ganha falta
+    allVolunteerIds: event ? [] : roster.filter((v) => v.active).map((v) => v.id),
     activeCodes: codeList(body.active_codes),
     absentReasons: reasons,
   });
-  return { id, saved_at: localNow().time, issues: issuesOf(roster, assignments, date, present) };
+  return { id, saved_at: localNow().time, issues: issuesOf(roster, assignments, date, present, event) };
 }
 
 /** Sugestão de escala para os presentes. Não grava nada: o site grava com PUT quando aceita. */
@@ -475,7 +517,8 @@ async function suggestSchedule({ sql, user, params, body }: Ctx) {
   const team = checkTeam(user, params.team);
   const present = idSet(body.present_ids);
   const codes = codeList(body.active_codes);
-  const roster = await db.getVolunteers(sql, { activeOnly: false, teams: [team] });
+  const event = isEventTeam(team);
+  const roster = await db.getVolunteers(sql, { activeOnly: false, teams: rosterTeams(team) });
   const volunteers = roster.filter((v) => v.active && present.has(v.id));
   const ids = volunteers.map((v) => v.id);
   const [stats, lastReception, lastMap, lastPositions, lastAltarGender] = await Promise.all([
@@ -505,7 +548,7 @@ async function suggestSchedule({ sql, user, params, body }: Ctx) {
   return {
     assignments: result.assignments,
     warnings: result.warnings,
-    issues: issuesOf(roster, result.assignments, date, present),
+    issues: issuesOf(roster, result.assignments, date, present, event),
   };
 }
 

@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import {
   api,
-  FACTORY_ACTIVE,
+  isEventTeam,
   POSITIONS,
   type Assignment,
   type Issue,
@@ -42,6 +42,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Confirm } from "@/components/ui/alert-dialog";
+import { EventPeople } from "@/components/EventPeople";
 import { PersonPicker, type PickerTarget } from "@/components/PersonPicker";
 import { PositionsSheet } from "@/components/PositionsSheet";
 
@@ -56,12 +57,21 @@ type SaveState =
   | { kind: "saved"; at: string }
   | { kind: "error"; msg: string };
 
-/** Estado inicial da tela a partir da folha: presença, posições ligadas e quem está em cada posição. */
+/**
+ * Estado inicial da tela a partir da folha: presença, posições ligadas e quem está em cada posição.
+ * No culto todos começam presentes; no evento ninguém começa escolhido.
+ */
 function fromSheet(data: Sheet) {
+  const event = isEventTeam(data.team);
   const activeIds = data.volunteers.filter((v) => v.active).map((v) => v.id);
   const assign: Record<string, number> = {};
   if (!data.saved) {
-    return { present: new Set(activeIds), reasons: {} as Record<number, string>, active: new Set(data.default_active), assign };
+    return {
+      present: new Set(event ? [] : activeIds),
+      reasons: {} as Record<number, string>,
+      active: new Set(data.default_active),
+      assign,
+    };
   }
   const absent = new Set(data.saved.absent_ids);
   const active = new Set(data.saved.active_codes ?? data.default_active);
@@ -71,8 +81,9 @@ function fromSheet(data: Sheet) {
       active.add(a.position_code);
     }
   });
+  const chosen = new Set([...data.saved.present_ids, ...Object.values(assign)]);
   return {
-    present: new Set(activeIds.filter((id) => !absent.has(id))),
+    present: new Set(activeIds.filter((id) => (event ? chosen.has(id) : !absent.has(id)))),
     reasons: Object.fromEntries(
       Object.entries(data.saved.absent_reasons ?? {}).map(([k, v]) => [Number(k), v]),
     ) as Record<number, string>,
@@ -118,6 +129,8 @@ export function EscalaPage({
 
   const vols = useMemo<Record<number, Volunteer>>(() => Object.fromEntries(day.volunteers.map((v) => [v.id, v])), [day]);
   const hasSchedule = Object.keys(assign).length > 0;
+  /** evento: a equipe junta todos os voluntários e se escolhe quem serve (ninguém ganha falta) */
+  const event = isEventTeam(day.team);
 
   // endereço com "#pick=CÓDIGO" já abre a troca dessa posição
   useEffect(() => {
@@ -148,9 +161,9 @@ export function EscalaPage({
       present_ids: [...s.present],
       active_codes: [...s.active],
       assignments: toAssignments(s.assign, s.vols),
-      absent_reasons: Object.fromEntries(
-        Object.entries(s.reasons).filter(([id, r]) => r.trim() && !s.present.has(Number(id))),
-      ),
+      absent_reasons: isEventTeam(s.day.team)
+        ? {}
+        : Object.fromEntries(Object.entries(s.reasons).filter(([id, r]) => r.trim() && !s.present.has(Number(id)))),
     };
     try {
       // gravar já devolve as regras quebradas: não há um pedido separado só para conferir
@@ -276,6 +289,22 @@ export function EscalaPage({
     if (hasSchedule) edited();
   };
 
+  /** Evento: troca a lista de quem vai servir. Quem saiu da lista sai também das posições. */
+  const setPeople = (next: Set<number>) => {
+    const gone = new Set([...present].filter((id) => !next.has(id)));
+    const emptied = Object.keys(assign).filter((c) => gone.has(assign[c]));
+    if (emptied.length) {
+      setAssign((p) => Object.fromEntries(Object.entries(p).filter(([, v]) => !gone.has(v))));
+      if (gone.size === 1) {
+        toast(`${vols[[...gone][0]]?.name} saiu do evento`, {
+          description: `${emptied.length} ${emptied.length === 1 ? "posição ficou vazia" : "posições ficaram vazias"}.`,
+        });
+      }
+    }
+    setPresent(next);
+    if (hasSchedule) edited();
+  };
+
   /** Coloca na recepção (vagas livres, ligando as extras se precisar) quem está presente e fora do mapa.
    *  Recepção não faz entrada: a entrada da pessoa passa para alguém do mapa sem entrada (ou fica vazia).
    *  No último domingo a recepção também não faz saída: idem para a saída. */
@@ -377,7 +406,7 @@ export function EscalaPage({
       <header className="no-print sticky top-0 z-20 flex items-center gap-3 border-b bg-background/85 px-3 py-2.5 backdrop-blur md:px-5">
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-lg leading-tight font-semibold">
-            Escala do culto <span className="font-normal text-muted-foreground max-sm:hidden">· {weekday(day.weekday)}</span>
+            Escala do {event ? "evento" : "culto"} <span className="font-normal text-muted-foreground max-sm:hidden">· {weekday(day.weekday)}</span>
           </h1>
           <SaveIndicator state={save} />
         </div>
@@ -404,7 +433,11 @@ export function EscalaPage({
 
       <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-3 py-4 md:px-5 md:py-5">
         {/* ------------------------------------------------ 1. culto */}
-        <Step n={1} title="Qual culto?" hint="Confira a data e a equipe que vai servir.">
+        <Step
+          n={1}
+          title={event ? "Qual evento?" : "Qual culto?"}
+          hint={event ? "Confira a data. Para um culto comum, troque a equipe." : "Confira a data e a equipe que vai servir."}
+        >
           <Card className="no-print space-y-3 p-3 md:p-4">
             <div className="flex flex-wrap gap-3">
               <label className="flex min-w-[150px] flex-1 flex-col gap-1.5 text-sm font-medium sm:max-w-[200px]">
@@ -439,7 +472,22 @@ export function EscalaPage({
           </Card>
         </Step>
 
-        {/* ------------------------------------------------ 2. presença */}
+        {/* ------------------------------------------------ 2. presença (no evento: quem vai servir) */}
+        {event ? (
+          <Step
+            n={2}
+            title="Quem vai servir?"
+            hint={
+              <>
+                Ninguém começa escolhido. Traga uma equipe inteira, todo mundo ou as pessoas do último evento, e ajuste
+                tocando nos nomes. <b className="text-foreground">Quem não for escolhido não ganha falta.</b>
+              </>
+            }
+          >
+            <EventPeople volunteers={activeVols} chosen={present} lastEvent={day.last_event} onChange={setPeople} />
+            <VolunteerNotes people={notes} />
+          </Step>
+        ) : (
         <Step
           n={2}
           title="Quem faltou?"
@@ -558,32 +606,22 @@ export function EscalaPage({
                 </div>
               )}
 
-              {notes.length > 0 && (
-                <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50/70 p-3">
-                  <div className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold text-amber-900">
-                    <StickyNote className="size-4" /> Recados dos voluntários
-                  </div>
-                  <ul className="space-y-1 text-sm text-amber-950">
-                    {notes.map((v) => (
-                      <li key={v.id}>
-                        <b className="font-medium">{v.name}:</b> {v.observation}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+              <VolunteerNotes people={notes} className="mt-4" />
             </div>
           </Card>
         </Step>
+        )}
 
         {/* ------------------------------------------------ 3. gerar */}
         <Step
           n={3}
           title="Fazer a escala"
           hint={
-            hasSchedule
-              ? "A escala já está feita e salva. Mudou quem veio? Faça de novo (as trocas feitas à mão serão perdidas)."
-              : "O sistema coloca quem veio nas posições, seguindo as regras. Você pode trocar qualquer pessoa depois."
+            event && !present.size
+              ? "Escolha quem vai servir no passo 2 para fazer a escala."
+              : hasSchedule
+                ? `A escala já está feita e salva. Mudou ${event ? "quem vai servir" : "quem veio"}? Faça de novo (as trocas feitas à mão serão perdidas).`
+                : `O sistema coloca ${event ? "quem vai servir" : "quem veio"} nas posições, seguindo as regras. Você pode trocar qualquer pessoa depois.`
           }
           className="no-print"
         >
@@ -593,7 +631,7 @@ export function EscalaPage({
               variant={hasSchedule ? "outline" : "default"}
               className="max-sm:w-full"
               onClick={() => (hasSchedule ? setConfirmGen(true) : generate())}
-              disabled={generating}
+              disabled={generating || (event && !present.size)}
             >
               {generating ? <Loader2 className="animate-spin" /> : hasSchedule ? <RotateCcw /> : <Sparkles />}
               {generating ? "Fazendo a escala…" : hasSchedule ? "Fazer de novo" : "Fazer a escala"}
@@ -798,7 +836,11 @@ export function EscalaPage({
             if (!day) return;
             const r = await api.setTeamPositions(day.team, [...active]);
             setDefaults(r.codes);
-            toast.success("Guardado: os próximos cultos desta equipe começam com estas posições.");
+            toast.success(
+              event
+                ? "Guardado: os próximos eventos começam com estas posições."
+                : "Guardado: os próximos cultos desta equipe começam com estas posições.",
+            );
           } catch (e) {
             toast.error((e as Error).message);
           }
@@ -897,6 +939,25 @@ function toAssignments(assign: Record<string, number>, vols: Record<number, Volu
     volunteer_id: vid,
     volunteer_name: vols[vid]?.name ?? "",
   }));
+}
+
+/** Recados no cadastro de quem vai servir (ex.: só pode até as 10h). */
+function VolunteerNotes({ people, className }: { people: Volunteer[]; className?: string }) {
+  if (!people.length) return null;
+  return (
+    <div className={cn("rounded-lg border border-amber-200 bg-amber-50/70 p-3", className)}>
+      <div className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold text-amber-900">
+        <StickyNote className="size-4" /> Recados dos voluntários
+      </div>
+      <ul className="space-y-1 text-sm text-amber-950">
+        {people.map((v) => (
+          <li key={v.id}>
+            <b className="font-medium">{v.name}:</b> {v.observation}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 function Legend({ className, label }: { className: string; label: string }) {

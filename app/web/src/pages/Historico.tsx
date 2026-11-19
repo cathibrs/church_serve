@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { motion } from "motion/react";
 import { CalendarCheck, ChevronRight, Search, TrendingDown, UserX, Users } from "lucide-react";
-import type { AbsenceItem, Me } from "@/lib/api";
+import { isEventTeam, type AbsenceItem, type Me } from "@/lib/api";
 import type { Route, ScreenData } from "@/lib/screens";
 import { br, cn, normalize, teamLabel } from "@/lib/utils";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
@@ -88,7 +88,8 @@ export function HistoricoPage({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todas as equipes</SelectItem>
-            {me.teams.map((t) => (
+            {/* Eventos não tem gente cadastrada: as escalas de evento aparecem em "Todas as equipes" */}
+            {me.teams.filter((t) => !isEventTeam(t)).map((t) => (
               <SelectItem key={t} value={t}>
                 {teamLabel(t)}
               </SelectItem>
