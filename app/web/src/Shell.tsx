@@ -7,13 +7,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import { toast, Toaster } from "sonner";
 import type { Me } from "@/lib/api";
-import { href, load, parse, type Route, type Screen } from "@/lib/screens";
+import { ADMIN_PAGES, href, load, parse, type Route, type Screen } from "@/lib/screens";
 import { AppSidebar, MobileNav } from "@/components/AppSidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { EscalaPage } from "@/pages/Escala";
 import { VoluntariosPage } from "@/pages/Voluntarios";
 import { HistoricoPage } from "@/pages/Historico";
 import { AcessosPage } from "@/pages/Acessos";
+import { AtividadePage } from "@/pages/Atividade";
 import { ChangePassword } from "@/components/ChangePassword";
 
 /** Como o endereço do navegador acompanha a troca de tela. */
@@ -53,7 +54,7 @@ export default function Shell({ me, first, onSignOut }: { me: Me; first: Screen;
   /** Busca os dados da tela e só então a mostra. */
   const open = useCallback(
     async (wanted: Route, mode: Mode = "push") => {
-      const route: Route = wanted.page === "acessos" && !isAdmin ? { page: "escala" } : wanted;
+      const route: Route = ADMIN_PAGES.includes(wanted.page) && !isAdmin ? { page: "escala" } : wanted;
       const turn = ++latest.current;
       setLoading(true);
       try {
@@ -125,6 +126,7 @@ export default function Shell({ me, first, onSignOut }: { me: Me; first: Screen;
                 <HistoricoPage me={me} team={screen.route.team} data={screen.data} onOpen={open} />
               )}
               {screen.page === "acessos" && <AcessosPage key={stamp} me={me} users={screen.data} />}
+              {screen.page === "atividade" && <AtividadePage key={stamp} me={me} page={screen.data} />}
           </motion.div>
         </main>
       </div>

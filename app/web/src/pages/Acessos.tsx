@@ -1,15 +1,30 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
-import { Check, ChevronDown, Copy, KeyRound, Loader2, Pencil, Trash2, UserPlus, Users, X } from "lucide-react";
-import { api, type AccessChange, type AccessUser, type Me, type Role } from "@/lib/api";
-import { teamLabel } from "@/lib/utils";
+import {
+  Ban,
+  Check,
+  ChevronDown,
+  Copy,
+  KeyRound,
+  Loader2,
+  Pencil,
+  RotateCcw,
+  ShieldCheck,
+  Trash2,
+  UserPlus,
+  Users,
+  X,
+} from "lucide-react";
+import { api, type AccessChange, type AccessUser, type Me, type Role, type Rules } from "@/lib/api";
+import { br, cn, teamLabel } from "@/lib/utils";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Confirm } from "@/components/ui/alert-dialog";
 import { Dialog } from "@/components/ui/dialog";
-import { Tooltip } from "@/components/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   DropdownMenu,
@@ -44,6 +59,7 @@ const sorted = (users: AccessUser[]) =>
 const EMPTY: Draft = { email: "", name: "", role: "coordinator", teams: [], editing: false };
 
 function AccountStatus({ user }: { user: AccessUser }) {
+  if (user.suspended) return <Badge variant="destructive">Suspenso</Badge>;
   if (!user.has_account) return <Badge variant="outline">Ainda não criou a conta</Badge>;
   if (!user.verified) return <Badge variant="warning">E-mail não confirmado</Badge>;
   return <Badge variant="success">Conta ativa</Badge>;
@@ -87,8 +103,17 @@ export function AcessosPage({ me, users }: { me: Me; users: AccessUser[] }) {
   const [busy, setBusy] = useState(false);
   const [removing, setRemoving] = useState<AccessUser | null>(null);
   const [resetting, setResetting] = useState<AccessUser | null>(null);
+  const [suspending, setSuspending] = useState<AccessUser | null>(null);
   /** senha recém-criada, mostrada uma única vez */
   const [shown, setShown] = useState<NewPassword | null>(null);
+
+  /** Suspende ou reativa e põe na lista o acesso que a API devolveu. */
+  const suspend = (target: AccessUser, suspended: boolean) =>
+    run(async () => {
+      const saved = await api.setSuspended(target.email, suspended);
+      setList((l) => sorted([...l.filter((u) => u.email !== saved.email), saved]));
+      toast.success(suspended ? `Acesso de ${target.email} suspenso.` : `Acesso de ${target.email} reativado.`);
+    });
 
   async function run(action: () => Promise<void>): Promise<boolean> {
     setBusy(true);
@@ -124,13 +149,14 @@ export function AcessosPage({ me, users }: { me: Me; users: AccessUser[] }) {
     if (await run(async () => apply(await api.saveUser(address, access), done))) setDraft(EMPTY);
   };
 
-  const admins = list.filter((u) => u.role === "admin").length;
+  /** administradores que conseguem entrar (suspensos não contam) */
+  const admins = list.filter((u) => u.role === "admin" && !u.suspended).length;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex flex-wrap items-center gap-2 border-b bg-background/85 px-3 py-2.5 backdrop-blur md:px-5">
         <div className="mr-auto">
-          <h1 className="text-[15px] leading-tight font-semibold">Acessos</h1>
+          <h1 className="text-lg leading-tight font-semibold">Acessos</h1>
           <p className="text-xs text-muted-foreground">
             {`${list.length} e-mail(s) liberado(s) · ${admins} administrador(es)`}
           </p>
@@ -188,36 +214,42 @@ export function AcessosPage({ me, users }: { me: Me; users: AccessUser[] }) {
         </p>
       </form>
 
-      <div className="min-h-0 flex-1 overflow-auto px-3 py-3 md:px-5">
+      <div className="min-h-0 flex-1 space-y-3 overflow-auto px-3 py-3 md:px-5">
+        <RulesCard initial={me.rules} />
         <Card className="overflow-x-auto">
           {/* no celular a tabela mantém uma largura legível e rola para o lado dentro do cartão */}
-          <table className="w-full border-collapse text-[13px] max-md:min-w-[820px]">
+          <table className="w-full border-collapse text-sm max-md:min-w-[1000px]">
             <thead className="bg-muted/80 text-left text-xs text-muted-foreground">
               <tr className="h-9 [&>th]:font-medium">
-                <th className="pl-4">E-mail</th>
-                <th className="px-2">Nome</th>
+                <th className="pl-4">Pessoa</th>
                 <th className="px-2">Situação da conta</th>
                 <th className="px-2">Papel</th>
                 <th className="px-2">Equipes</th>
-                <th className="px-2">Liberado em</th>
-                <th className="w-32" />
+                <th className="px-2 whitespace-nowrap">Liberado em</th>
+                <th className="px-2 whitespace-nowrap">Último acesso</th>
+                <th className="px-3 text-right">O que fazer</th>
               </tr>
             </thead>
             <tbody>
               {list.map((u) => {
                 const self = u.email === me.email;
-                const lastAdmin = u.role === "admin" && admins <= 1;
+                const lastAdmin = u.role === "admin" && !u.suspended && admins <= 1;
                 const locked = self || lastAdmin;
-                const why = self
-                  ? "Você não pode mudar nem remover o seu próprio acesso."
-                  : "O sistema precisa de pelo menos um administrador.";
                 return (
-                  <tr key={u.email} className="h-11 border-t transition-colors hover:bg-muted/40">
-                    <td className="max-w-[300px] truncate pl-4 font-medium" title={u.email}>
-                      {u.email}
-                      {self && <span className="ml-2 text-xs font-normal text-muted-foreground">(você)</span>}
+                  <tr
+                    key={u.email}
+                    className={cn("h-11 border-t transition-colors hover:bg-muted/40", u.suspended && "bg-muted/30 text-muted-foreground")}
+                  >
+                    {/* nome e e-mail juntos: a tabela cabe na tela sem rolar para o lado */}
+                    <td className="max-w-[280px] py-1.5 pl-4">
+                      <div className="truncate font-medium">
+                        {u.name ?? <span className="font-normal text-muted-foreground">sem nome</span>}
+                        {self && <span className="ml-2 text-xs font-normal text-muted-foreground">(você)</span>}
+                      </div>
+                      <div className="truncate text-xs text-muted-foreground" title={u.email}>
+                        {u.email}
+                      </div>
                     </td>
-                    <td className="px-2 whitespace-nowrap">{u.name ?? "—"}</td>
                     <td className="px-2">
                       <AccountStatus user={u} />
                     </td>
@@ -242,49 +274,69 @@ export function AcessosPage({ me, users }: { me: Me; users: AccessUser[] }) {
                     >
                       {u.created_at.slice(0, 10).split("-").reverse().join("/")}
                     </td>
-                    <td className="pr-3 text-right whitespace-nowrap">
+                    <td className="px-2 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
+                      {u.last_seen_at ? lastSeen(u.last_seen_at) : "nunca entrou"}
+                    </td>
+                    <td className="py-1.5 pr-3 text-right">
+                      {/* ações com nome escrito; quando não se pode mexer, o motivo também fica escrito */}
                       {locked ? (
-                        <Tooltip tap content={why}>
-                          <span className="text-xs text-muted-foreground">fixo</span>
-                        </Tooltip>
+                        <span className="block max-w-[220px] text-right text-xs text-muted-foreground ml-auto">
+                          {self ? "é você (não pode mudar o próprio acesso)" : "único administrador (precisa ficar)"}
+                        </span>
                       ) : (
-                        <>
-                          <Tooltip content="Alterar papel e equipes">
+                        <div className="flex flex-wrap justify-end gap-1.5">
+                          <Button
+                            variant="outline"
+                            size="xs"
+                            aria-label={`Alterar acesso de ${u.email}`}
+                            disabled={busy}
+                            onClick={() =>
+                              setDraft({ email: u.email, name: u.name ?? "", role: u.role, teams: u.teams, editing: true })
+                            }
+                          >
+                            <Pencil /> Alterar
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="xs"
+                            aria-label={`Gerar nova senha para ${u.email}`}
+                            disabled={busy}
+                            onClick={() => setResetting(u)}
+                          >
+                            <KeyRound /> Nova senha
+                          </Button>
+                          {u.suspended ? (
                             <Button
-                              variant="ghost"
-                              size="icon-sm"
-                              aria-label={`Alterar acesso de ${u.email}`}
+                              variant="outline"
+                              size="xs"
+                              aria-label={`Reativar acesso de ${u.email}`}
                               disabled={busy}
-                              onClick={() =>
-                                setDraft({ email: u.email, name: u.name ?? "", role: u.role, teams: u.teams, editing: true })
-                              }
+                              onClick={() => suspend(u, false)}
                             >
-                              <Pencil />
+                              <RotateCcw /> Reativar
                             </Button>
-                          </Tooltip>
-                          <Tooltip content="Gerar nova senha">
+                          ) : (
                             <Button
-                              variant="ghost"
-                              size="icon-sm"
-                              aria-label={`Gerar nova senha para ${u.email}`}
+                              variant="outline"
+                              size="xs"
+                              aria-label={`Suspender acesso de ${u.email}`}
                               disabled={busy}
-                              onClick={() => setResetting(u)}
+                              onClick={() => setSuspending(u)}
                             >
-                              <KeyRound />
+                              <Ban /> Suspender
                             </Button>
-                          </Tooltip>
-                          <Tooltip content="Remover acesso">
-                            <Button
-                              variant="ghost"
-                              size="icon-sm"
-                              aria-label={`Remover acesso de ${u.email}`}
-                              disabled={busy}
-                              onClick={() => setRemoving(u)}
-                            >
-                              <Trash2 />
-                            </Button>
-                          </Tooltip>
-                        </>
+                          )}
+                          <Button
+                            variant="outline"
+                            size="xs"
+                            className="text-destructive hover:text-destructive"
+                            aria-label={`Remover acesso de ${u.email}`}
+                            disabled={busy}
+                            onClick={() => setRemoving(u)}
+                          >
+                            <Trash2 /> Remover
+                          </Button>
+                        </div>
                       )}
                     </td>
                   </tr>
@@ -337,8 +389,97 @@ export function AcessosPage({ me, users }: { me: Me; users: AccessUser[] }) {
         }}
       />
 
+      <Confirm
+        open={!!suspending}
+        onOpenChange={(open) => !open && setSuspending(null)}
+        title="Suspender acesso?"
+        description={
+          <>
+            <b>{suspending?.email}</b> deixa de entrar no sistema na hora. O papel e as equipes ficam guardados: para
+            voltar, é só reativar.
+          </>
+        }
+        confirmLabel="Suspender"
+        destructive
+        onConfirm={() => {
+          const target = suspending!;
+          setSuspending(null);
+          suspend(target, true);
+        }}
+      />
+
       <PasswordDialog password={shown} onClose={() => setShown(null)} />
     </div>
+  );
+}
+
+/** "AAAA-MM-DD HH:MM:SS" -> "hoje 14:05", "ontem 09:30" ou "12/11/2026". */
+function lastSeen(stamp: string): string {
+  const day = (offset: number) =>
+    new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date(Date.now() - offset * 86400000));
+  const date = stamp.slice(0, 10);
+  if (date === day(0)) return `hoje ${stamp.slice(11, 16)}`;
+  if (date === day(1)) return `ontem ${stamp.slice(11, 16)}`;
+  return br(date);
+}
+
+const RULES: { key: keyof Rules; label: string; hint: string; on: string; off: string }[] = [
+  {
+    key: "coordinators_edit_volunteers",
+    label: "Coordenadores podem alterar o cadastro de voluntários",
+    hint: "Desligado: eles só veem o cadastro e escrevem observações. Quem cadastra e muda permissões é o administrador.",
+    on: "Cadastro liberado para coordenadores.",
+    off: "Cadastro travado para coordenadores.",
+  },
+  {
+    key: "lock_past_schedules",
+    label: "Travar escalas de cultos que já passaram",
+    hint: "Ligado: coordenadores não mudam a escala nem a presença depois do dia do culto. Administradores continuam podendo.",
+    on: "Escalas passadas travadas para coordenadores.",
+    off: "Escalas passadas liberadas.",
+  },
+];
+
+/** O que os coordenadores podem fazer. Cada chave grava na hora. */
+function RulesCard({ initial }: { initial: Rules }) {
+  const [rules, setRules] = useState<Rules>(initial);
+  const [saving, setSaving] = useState<keyof Rules | null>(null);
+
+  const toggle = async (key: keyof Rules, value: boolean) => {
+    const item = RULES.find((r) => r.key === key)!;
+    setSaving(key);
+    setRules((r) => ({ ...r, [key]: value }));
+    try {
+      setRules(await api.saveRules({ [key]: value }));
+      toast.success(value ? item.on : item.off);
+    } catch (e) {
+      setRules((r) => ({ ...r, [key]: !value }));
+      toast.error((e as Error).message);
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  return (
+    <Card className="px-4 py-3">
+      <h2 className="flex items-center gap-2 text-sm font-semibold">
+        <ShieldCheck className="size-4 text-muted-foreground" /> Regras para coordenadores
+      </h2>
+      <div className="mt-2 divide-y">
+        {RULES.map((r) => (
+          <Label key={r.key} className="flex items-start justify-between gap-4 py-2.5 font-normal">
+            <span>
+              <span className="block text-sm">{r.label}</span>
+              <span className="block text-xs text-muted-foreground">{r.hint}</span>
+            </span>
+            <span className="flex shrink-0 items-center gap-2 pt-0.5">
+              {saving === r.key && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
+              <Switch checked={rules[r.key]} disabled={saving !== null} onCheckedChange={(c) => toggle(r.key, c)} />
+            </span>
+          </Label>
+        ))}
+      </div>
+    </Card>
   );
 }
 

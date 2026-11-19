@@ -1,7 +1,19 @@
 import { useEffect, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { AnimatePresence, motion } from "motion/react";
-import { CalendarRange, History, KeyRound, Lock, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Users, X } from "lucide-react";
+import {
+  CalendarRange,
+  History,
+  KeyRound,
+  Lock,
+  LogOut,
+  Menu,
+  PanelLeftClose,
+  PanelLeftOpen,
+  ScrollText,
+  Users,
+  X,
+} from "lucide-react";
 import { href, prefetch, type Page, type Route } from "@/lib/screens";
 import { cn } from "@/lib/utils";
 import { Tooltip } from "./ui/tooltip";
@@ -10,7 +22,8 @@ const NAV: { id: Page; label: string; icon: React.ElementType; hint: string; adm
   { id: "escala", label: "Escala", icon: CalendarRange, hint: "Mapa e ficha do culto" },
   { id: "voluntarios", label: "Voluntários", icon: Users, hint: "Cadastro e permissões" },
   { id: "historico", label: "Histórico e faltas", icon: History, hint: "Rotatividade e ausências" },
-  { id: "acessos", label: "Acessos", icon: KeyRound, hint: "Quem pode entrar", adminOnly: true },
+  { id: "acessos", label: "Acessos", icon: KeyRound, hint: "Quem pode entrar e regras", adminOnly: true },
+  { id: "atividade", label: "Atividade", icon: ScrollText, hint: "Quem fez o quê", adminOnly: true },
 ];
 
 const OPEN_W = 236;

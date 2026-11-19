@@ -10,5 +10,7 @@ export default defineConfig({
   resolve: { alias: { "@": path.resolve(import.meta.dirname, "src") } },
   build: { outDir: "dist", emptyOutDir: true, chunkSizeWarningLimit: 1100 },
   // "npm run dev" usa o netlify dev, que serve este Vite e as funções de /api juntos.
-  test: { include: ["server/**/*.test.ts"] },
+  // Cada arquivo de teste sobe o seu Postgres embutido (PGlite), e alguns testes sobem outro;
+  // com vários em paralelo, isso passa dos limites padrão (10 s e 5 s) em máquina mais lenta.
+  test: { include: ["server/**/*.test.ts"], hookTimeout: 60_000, testTimeout: 30_000 },
 });

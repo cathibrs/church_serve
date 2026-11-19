@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { api, ApiError, type Me } from "@/lib/api";
-import { forget, parse, prefetch, type Screen } from "@/lib/screens";
+import { ADMIN_PAGES, forget, parse, prefetch, type Screen } from "@/lib/screens";
 import { authClient, authConfigured, clearToken, signOut } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { AccessNotice, LoginPage } from "@/pages/Login";
@@ -82,7 +82,8 @@ function Gate({ onReady, onRejected }: { onReady: () => void; onRejected: (reaso
         // endereço que a pessoa não pode abrir (ou que não existe mais) cai na escala
         const first = await wanted.catch(() => prefetch({ page: "escala" }));
         if (!alive) return;
-        setReady({ me, first: first.page === "acessos" && me.role !== "admin" ? await prefetch({ page: "escala" }) : first });
+        const adminOnly = ADMIN_PAGES.includes(first.page) && me.role !== "admin";
+        setReady({ me, first: adminOnly ? await prefetch({ page: "escala" }) : first });
         onReady();
       })
       .catch((e) => {

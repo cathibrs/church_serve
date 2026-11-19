@@ -2,11 +2,14 @@
  * API REST (/api/*). Cada endereço é um recurso e o verbo diz o que fazer com ele:
  *
  *   GET    /api/config                             público: endereço do login
- *   GET    /api/me                                 quem está logado, papel e equipes
+ *   GET    /api/me                                 quem está logado, papel, equipes e regras
  *
- *   GET    /api/volunteers[?team=]                 voluntários, com faltas e vezes que serviram
+ *   GET    /api/volunteers[?team=]                 voluntários, com faltas, vezes que serviram e observações
  *   POST   /api/volunteers                         cadastra (201)
  *   PATCH  /api/volunteers/:id                     altera só os campos enviados
+ *   GET    /api/volunteers/:id/notes               observações datadas do voluntário
+ *   POST   /api/volunteers/:id/notes               escreve uma observação (201)
+ *   DELETE /api/volunteers/:id/notes/:note         apaga (quem escreveu ou admin) (204)
  *
  *   GET    /api/schedules[?team=]                  escalas salvas (lista resumida)
  *   GET    /api/schedules/:date[/:team]            folha do culto: equipe, presença e a escala salva
@@ -18,8 +21,11 @@
  *
  *   GET    /api/users                              acessos liberados (só admin)
  *   PUT    /api/users/:email                       libera um e-mail ou muda papel e equipes (201 ou 200)
+ *   PATCH  /api/users/:email                       suspende ou reativa o acesso ({ suspended })
  *   DELETE /api/users/:email                       remove o acesso (204)
  *   POST   /api/users/:email/password              gera uma senha nova (201)
+ *   PUT    /api/rules                              regras para coordenadores (só admin)
+ *   GET    /api/activity[?actor=&group=&team=&before=]  registro de quem fez o quê (só admin)
  *
  * Erros respondem { error, code? } com o status HTTP correspondente. O que é fixo (posições,
  * regras) não passa por aqui: está em shared/catalog.ts e já vai dentro do site.
@@ -39,6 +45,7 @@ import {
 import * as db from "./db.ts";
 import { activePositions, buildSchedule, validate } from "./engine.ts";
 import type { Assignment, Issue, Volunteer } from "./models.ts";
+import { isMissingSchema, upgradeSchema } from "./upgrade.ts";
 
 type Body = Record<string, any>;
 type Sql = db.Sql;
@@ -130,6 +137,56 @@ function localStamp(at: Date | string): string {
   return `${date} ${time}`;
 }
 
+/** Para as frases do registro de atividades. */
+const teamName = (team: string) => team.replaceAll("_", " ");
+const brDate = (iso: string) => iso.split("-").reverse().join("/");
+const snippet = (text: string, max = 80) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+
+// ====================================================================== registro de atividades
+
+/**
+ * Anota quem fez o quê. A ação já foi gravada quando chega aqui: se a anotação falhar, o
+ * pedido não vira erro (a pessoa tentaria de novo algo que deu certo), só fica no log do servidor.
+ */
+async function log({ sql, user }: Ctx, entry: Omit<db.ActivityInput, "actor">, merge?: "30 minutes"): Promise<void> {
+  try {
+    await db.logActivity(sql, { actor: user.email, ...entry }, merge);
+  } catch (e) {
+    console.error("registro de atividades:", e);
+  }
+}
+
+const PERM_LABEL = {
+  can_bercario: "Berçário",
+  can_cozinha: "Cozinha",
+  can_recepcao: "Recepção",
+  can_banheiro: "Banheiro",
+  can_limpar_altar: "Altar",
+} as const;
+
+/** O que mudou no cadastro, em palavras ("equipe: A → B", "desativado", "não pode Cozinha"). */
+function volunteerChanges(a: Volunteer, b: Volunteer): string[] {
+  const out: string[] = [];
+  if (a.name !== b.name) out.push(`nome: ${a.name} → ${b.name}`);
+  if (a.gender !== b.gender) out.push(`gênero: ${b.gender}`);
+  if (a.team !== b.team) out.push(`equipe: ${teamName(a.team)} → ${teamName(b.team)}`);
+  if (a.active !== b.active) out.push(b.active ? "ativado" : "desativado");
+  for (const [key, label] of Object.entries(PERM_LABEL) as [keyof typeof PERM_LABEL, string][]) {
+    if (a[key] !== b[key]) out.push(`${b[key] ? "pode" : "não pode"} ${label}`);
+  }
+  if ((a.observation ?? "") !== (b.observation ?? "")) out.push(b.observation ? "recado alterado" : "recado apagado");
+  return out;
+}
+
+/** Só os campos que mudaram, antes e depois (vão em `details`). */
+function changedFields(a: Volunteer, b: Volunteer) {
+  const keys = (Object.keys(b) as (keyof Volunteer)[]).filter((k) => k !== "id" && a[k] !== b[k]);
+  return { before: Object.fromEntries(keys.map((k) => [k, a[k]])), after: Object.fromEntries(keys.map((k) => [k, b[k]])) };
+}
+
+const roleText = (role: db.Role, teams: string[]) =>
+  role === "admin" ? "administrador" : `coordenador de ${teams.map(teamName).join(", ")}`;
+
 // ====================================================================== equipes de quem está logado
 
 /** Equipes que a pessoa pode usar: null = todas (admin); coordenador = só as dele. */
@@ -186,7 +243,49 @@ function issuesOf(roster: Volunteer[], assignments: Assignment[], date: string, 
 // ====================================================================== sessão
 
 async function getMe({ sql, user }: Ctx) {
-  return { email: user.email, role: user.role, teams: ownTeams(user) ?? (await db.getAvailableTeams(sql)) };
+  const [teams, rules] = await Promise.all([ownTeams(user) ?? db.getAvailableTeams(sql), db.getRules(sql)]);
+  return { email: user.email, role: user.role, teams, rules };
+}
+
+// ====================================================================== regras para coordenadores
+
+/** Recusa a alteração do cadastro quando o admin travou o cadastro para coordenadores. */
+async function checkVolunteerEditing(sql: Sql, user: AuthUser): Promise<void> {
+  if (user.role === "admin") return;
+  if (!(await db.getRules(sql)).coordinators_edit_volunteers) {
+    throw denied("forbidden", "O cadastro de voluntários está travado pelo administrador. Só observações podem ser escritas.");
+  }
+}
+
+/** Recusa mudar a escala de um culto que já passou, quando o admin travou as escalas passadas. */
+async function checkPastSchedule(sql: Sql, user: AuthUser, date: string): Promise<void> {
+  if (user.role === "admin" || date >= localNow().date) return;
+  if ((await db.getRules(sql)).lock_past_schedules) {
+    throw denied("forbidden", "As escalas de cultos que já passaram estão travadas pelo administrador.");
+  }
+}
+
+async function putRules(ctx: Ctx) {
+  requireAdmin(ctx.user);
+  const before = await db.getRules(ctx.sql);
+  const rules = await db.setRules(ctx.sql, ctx.body);
+  const parts: string[] = [];
+  if (before.coordinators_edit_volunteers !== rules.coordinators_edit_volunteers) {
+    parts.push(rules.coordinators_edit_volunteers ? "liberou o cadastro de voluntários" : "travou o cadastro de voluntários");
+  }
+  if (before.lock_past_schedules !== rules.lock_past_schedules) {
+    parts.push(rules.lock_past_schedules ? "travou as escalas passadas" : "liberou as escalas passadas");
+  }
+  if (parts.length) {
+    const text = parts.join(" e ");
+    await log(ctx, {
+      action: "rules.save",
+      target: "rules",
+      summary: `Para coordenadores: ${text}.`,
+      details: { before, after: rules },
+    });
+  }
+  return rules;
 }
 
 // ====================================================================== voluntários
@@ -195,24 +294,99 @@ async function listVolunteers({ sql, user, query }: Ctx) {
   return db.getVolunteersWithStats(sql, scopeOf(user, query.team));
 }
 
-async function createVolunteer({ sql, user, body }: Ctx) {
-  // coordenador só cadastra em equipe dele
-  if (ownTeams(user) !== null) checkTeam(user, db.cleanTeam(body.team));
-  return new Reply(201, await db.createVolunteer(sql, body));
+async function createVolunteer(ctx: Ctx) {
+  const { sql, user, body } = ctx;
+  if (ownTeams(user) !== null) {
+    // coordenador só cadastra em equipe dele, e só se o admin não travou o cadastro
+    checkTeam(user, db.cleanTeam(body.team));
+    await checkVolunteerEditing(sql, user);
+  }
+  const saved = await db.createVolunteer(sql, body);
+  await log(ctx, {
+    action: "volunteer.create",
+    target: `volunteer:${saved.id}`,
+    team: saved.team,
+    summary: `Cadastrou ${saved.name} em ${teamName(saved.team)}.`,
+  });
+  return new Reply(201, saved);
 }
 
-async function updateVolunteer({ sql, user, params, body }: Ctx) {
+async function updateVolunteer(ctx: Ctx) {
+  const { sql, user, params, body } = ctx;
   const id = idOf(params.id);
   if (ownTeams(user) !== null) {
     // coordenador só altera quem já é de uma equipe dele, e não manda ninguém para outra
     if (body.team !== undefined && body.team !== null) checkTeam(user, db.cleanTeam(body.team));
-    const current = await db.getVolunteerTeam(sql, id);
-    if (current === null) throw notFound("Voluntário não encontrado.");
-    checkTeam(user, current);
+  }
+  const before = await db.getVolunteer(sql, id);
+  if (!before) throw notFound("Voluntário não encontrado.");
+  if (ownTeams(user) !== null) {
+    checkTeam(user, before.team);
+    await checkVolunteerEditing(sql, user);
   }
   const saved = await db.updateVolunteer(sql, id, body);
   if (!saved) throw notFound("Voluntário não encontrado.");
+  const changes = volunteerChanges(before, saved);
+  if (changes.length) {
+    await log(ctx, {
+      action: "volunteer.update",
+      target: `volunteer:${id}`,
+      team: saved.team,
+      summary: `Alterou ${saved.name}: ${changes.join(", ")}.`,
+      details: changedFields(before, saved),
+    });
+  }
   return saved;
+}
+
+// ====================================================================== observações dos voluntários
+
+/** Voluntário do endereço, se existe e é de uma equipe da pessoa. */
+async function volunteerOf(sql: Sql, user: AuthUser, idText: string): Promise<Volunteer> {
+  const volunteer = await db.getVolunteer(sql, idOf(idText));
+  if (!volunteer) throw notFound("Voluntário não encontrado.");
+  checkTeam(user, volunteer.team);
+  return volunteer;
+}
+
+const toNote = (n: db.VolunteerNote) => ({ ...n, created_at: localStamp(n.created_at) });
+
+async function listNotes({ sql, user, params }: Ctx) {
+  const volunteer = await volunteerOf(sql, user, params.id);
+  return (await db.listNotes(sql, volunteer.id)).map(toNote);
+}
+
+/** Observação nova. Vale mesmo com o cadastro travado: escrever não muda a escala. */
+async function addNote(ctx: Ctx) {
+  const volunteer = await volunteerOf(ctx.sql, ctx.user, ctx.params.id);
+  const note = await db.addNote(ctx.sql, volunteer.id, ctx.body.body, ctx.user.email);
+  await log(ctx, {
+    action: "note.add",
+    target: `volunteer:${volunteer.id}`,
+    team: volunteer.team,
+    summary: `Escreveu sobre ${volunteer.name}: "${snippet(note.body)}"`,
+  });
+  return new Reply(201, toNote(note));
+}
+
+async function removeNote(ctx: Ctx) {
+  const { sql, user, params } = ctx;
+  const volunteer = await volunteerOf(sql, user, params.id);
+  const noteId = Number(params.note);
+  const note = Number.isInteger(noteId) && noteId > 0 ? await db.getNote(sql, volunteer.id, noteId) : null;
+  if (!note) throw notFound("Observação não encontrada.");
+  if (note.author !== user.email && user.role !== "admin") {
+    throw denied("forbidden", "Só quem escreveu a observação, ou um administrador, pode apagá-la.");
+  }
+  await db.removeNote(sql, note.id);
+  await log(ctx, {
+    action: "note.remove",
+    target: `volunteer:${volunteer.id}`,
+    team: volunteer.team,
+    summary: `Apagou uma observação sobre ${volunteer.name}${note.author === user.email ? "" : ` (escrita por ${note.author})`}: "${snippet(note.body)}"`,
+    details: { body: note.body, author: note.author, created_at: localStamp(note.created_at) },
+  });
+  return new Reply(204);
 }
 
 // ====================================================================== escalas
@@ -348,13 +522,58 @@ async function getHistory({ sql, user, query }: Ctx) {
   return db.getHistory(sql, scopeOf(user, query.team));
 }
 
-// ====================================================================== acessos (só admin)
+// ====================================================================== gravações com regra e registro
 
-function requireAdmin(user: AuthUser): void {
-  if (user.role !== "admin") throw denied("forbidden", "Só administradores podem gerenciar os acessos.");
+/**
+ * Grava a escala conferindo a trava de escalas passadas e anota no registro. A escala salva
+ * sozinha a cada troca na tela: as gravações seguidas do mesmo culto viram uma linha só.
+ */
+async function putScheduleChecked(ctx: Ctx) {
+  const date = dateOf(ctx.params.date);
+  checkTeam(ctx.user, ctx.params.team);
+  await checkPastSchedule(ctx.sql, ctx.user, date);
+  const result = await putSchedule(ctx);
+  const filled = assignmentsOf(ctx.body.assignments ?? []).length;
+  const present = idSet(ctx.body.present_ids).size;
+  await log(
+    ctx,
+    {
+      action: "schedule.save",
+      target: `schedule:${date}:${ctx.params.team}`,
+      team: ctx.params.team,
+      summary: `Salvou a escala de ${brDate(date)} · ${teamName(ctx.params.team)}: ${filled} posições, ${present} presentes.`,
+    },
+    "30 minutes",
+  );
+  return result;
 }
 
-const toUser = (u: db.AppUser) => ({ ...u, created_at: localStamp(u.created_at) });
+async function putTeamPositionsLogged(ctx: Ctx) {
+  const result = await putTeamPositions(ctx);
+  await log(
+    ctx,
+    {
+      action: "positions.save",
+      target: `positions:${ctx.params.team}`,
+      team: ctx.params.team,
+      summary: `Mudou as posições ligadas por padrão de ${teamName(ctx.params.team)} (${result.codes.length} ligadas).`,
+    },
+    "30 minutes",
+  );
+  return result;
+}
+
+// ====================================================================== acessos (só admin)
+
+function requireAdmin(user: AuthUser, what = "gerenciar os acessos"): void {
+  if (user.role !== "admin") throw denied("forbidden", `Só administradores podem ${what}.`);
+}
+
+const toUser = (u: db.AppUser) => ({
+  ...u,
+  created_at: localStamp(u.created_at),
+  last_seen_at: u.last_seen_at ? localStamp(u.last_seen_at) : null,
+});
 
 /** Nome para a conta de login: o informado ou, na falta, o começo do e-mail. */
 const accountName = (value: unknown, email: string) => db.cleanName(value).slice(0, 80) || email.split("@")[0];
@@ -364,9 +583,18 @@ async function listUsers({ sql, user }: Ctx) {
   return (await db.listAppUsers(sql)).map(toUser);
 }
 
-/** Recusa mudanças que deixariam o sistema sem admin ou tirariam o acesso de quem está pedindo. */
-async function guardAdminChange(sql: Sql, user: AuthUser, email: string, current: db.Access | null, next: db.Role | null) {
-  if (current?.role !== "admin" || next === "admin") return;
+/**
+ * Recusa mudanças que deixariam o sistema sem admin ou tirariam o acesso de quem está pedindo.
+ * `next` null = a pessoa perde o acesso (removida ou suspensa). Admin suspenso já não conta.
+ */
+async function guardAdminChange(
+  sql: Sql,
+  user: AuthUser,
+  email: string,
+  current: db.StoredAccess | null,
+  next: db.Role | null,
+) {
+  if (current?.role !== "admin" || current.suspended || next === "admin") return;
   if (email === user.email) {
     throw new UserError("Você não pode tirar o seu próprio acesso de administrador. Peça a outro administrador.");
   }
@@ -377,7 +605,8 @@ async function guardAdminChange(sql: Sql, user: AuthUser, email: string, current
  * Libera um e-mail ou muda o papel e as equipes de quem já está liberado. Quem ainda não tem
  * conta de login ganha uma, com senha aleatória que volta aqui uma única vez (não é guardada).
  */
-async function putUser({ sql, user, params, body, origin, accounts }: Ctx) {
+async function putUser(ctx: Ctx) {
+  const { sql, user, params, body, origin, accounts } = ctx;
   requireAdmin(user);
   const email = db.cleanEmail(params.email);
   const role = db.cleanRole(body.role ?? "coordinator");
@@ -398,21 +627,65 @@ async function putUser({ sql, user, params, body, origin, accounts }: Ctx) {
     }
   }
   await db.upsertAppUser(sql, email, { role, teams }, user.email);
+  if (!current || current.role !== role || !sameTeams([...current.teams].sort(), teams)) {
+    await log(ctx, {
+      action: "user.save",
+      target: `user:${email}`,
+      summary: current
+        ? `Mudou o acesso de ${email}: ${roleText(current.role, current.teams)} → ${roleText(role, teams)}.`
+        : `Liberou ${email} como ${roleText(role, teams)}.`,
+      details: { before: current && { role: current.role, teams: current.teams }, after: { role, teams } },
+    });
+  }
   const [saved] = await db.listAppUsers(sql, email);
   return new Reply(current ? 200 : 201, { user: toUser(saved), password });
 }
 
-async function deleteUser({ sql, user, params }: Ctx) {
+const sameTeams = (a: string[], b: string[]) => a.length === b.length && a.every((t, i) => t === b[i]);
+
+/** Suspende ou reativa um acesso. Suspenso não entra, mas o papel e as equipes ficam guardados. */
+async function patchUser(ctx: Ctx) {
+  const { sql, user, params, body } = ctx;
+  requireAdmin(user);
+  const email = db.cleanEmail(params.email);
+  if (typeof body.suspended !== "boolean") throw new UserError("Informe se o acesso fica suspenso (suspended).");
+  if (email === user.email) throw new UserError("Você não pode suspender nem reativar o seu próprio acesso.");
+  const current = await db.getAccess(sql, email);
+  if (!current) throw notFound("Esse e-mail não está liberado.");
+  if (body.suspended) await guardAdminChange(sql, user, email, current, null);
+  if (current.suspended !== body.suspended) {
+    await db.setSuspended(sql, email, body.suspended);
+    await log(ctx, {
+      action: body.suspended ? "user.suspend" : "user.reactivate",
+      target: `user:${email}`,
+      summary: `${body.suspended ? "Suspendeu" : "Reativou"} o acesso de ${email}.`,
+    });
+  }
+  const [saved] = await db.listAppUsers(sql, email);
+  return toUser(saved);
+}
+
+async function deleteUser(ctx: Ctx) {
+  const { sql, user, params } = ctx;
   requireAdmin(user);
   const email = db.cleanEmail(params.email);
   if (email === user.email) throw new UserError("Você não pode remover o seu próprio acesso.");
-  await guardAdminChange(sql, user, email, await db.getAccess(sql, email), null);
+  const current = await db.getAccess(sql, email);
+  await guardAdminChange(sql, user, email, current, null);
   await db.removeAppUser(sql, email);
+  if (current) {
+    await log(ctx, {
+      action: "user.remove",
+      target: `user:${email}`,
+      summary: `Removeu o acesso de ${email} (${roleText(current.role, current.teams)}).`,
+    });
+  }
   return new Reply(204);
 }
 
 /** Gera uma senha nova para alguém já liberado: a conta de login é recriada com ela. */
-async function resetPassword({ sql, user, params, origin, accounts }: Ctx) {
+async function resetPassword(ctx: Ctx) {
+  const { sql, user, params, origin, accounts } = ctx;
   requireAdmin(user);
   const email = db.cleanEmail(params.email);
   if (email === user.email) throw new UserError('Para trocar a sua própria senha, use "Alterar senha" no menu.');
@@ -422,8 +695,39 @@ async function resetPassword({ sql, user, params, origin, accounts }: Ctx) {
   await accounts.remove(sql, email);
   const created = await accounts.create(sql, { email, name: accountName(account?.name, email), password }, origin);
   if (!created) throw new HttpError(502, "Não foi possível recriar a conta de login. Tente de novo.");
+  await log(ctx, { action: "user.password", target: `user:${email}`, summary: `Gerou uma senha nova para ${email}.` });
   const [saved] = await db.listAppUsers(sql, email);
   return new Reply(201, { user: toUser(saved), password });
+}
+
+// ====================================================================== registro de atividades (só admin)
+
+const ACTIVITY_PAGE = 50;
+const ACTIVITY_GROUPS = new Set(["volunteer", "note", "schedule", "positions", "user", "rules"]);
+
+/** Uma página do registro, da mais recente para a mais antiga. `next`: id para pedir a página seguinte. */
+async function listActivity({ sql, user, query }: Ctx) {
+  requireAdmin(user, "ver o registro de atividades");
+  const before = query.before ? Number(query.before) : null;
+  if (before !== null && (!Number.isInteger(before) || before <= 0)) throw new UserError("Página inválida.");
+  const group = query.group || null;
+  if (group && !ACTIVITY_GROUPS.has(group)) throw new UserError("Tipo de atividade inválido.");
+  const [rows, actors] = await Promise.all([
+    db.listActivity(sql, {
+      actor: query.actor ? query.actor.trim().toLowerCase() : null,
+      group,
+      team: query.team || null,
+      before,
+      limit: ACTIVITY_PAGE + 1,
+    }),
+    db.activityActors(sql),
+  ]);
+  const page = rows.slice(0, ACTIVITY_PAGE);
+  return {
+    items: page.map((r) => ({ ...r, at: localStamp(r.at) })),
+    next: rows.length > ACTIVITY_PAGE ? page[page.length - 1].id : null,
+    actors,
+  };
 }
 
 // ====================================================================== rotas
@@ -436,17 +740,23 @@ const ROUTES: { method: string; parts: string[]; handler: Handler }[] = (
     ["GET", "/api/volunteers", listVolunteers],
     ["POST", "/api/volunteers", createVolunteer],
     ["PATCH", "/api/volunteers/:id", updateVolunteer],
+    ["GET", "/api/volunteers/:id/notes", listNotes],
+    ["POST", "/api/volunteers/:id/notes", addNote],
+    ["DELETE", "/api/volunteers/:id/notes/:note", removeNote],
     ["GET", "/api/schedules", listSchedules],
     ["GET", "/api/schedules/:date", getSheet],
     ["GET", "/api/schedules/:date/:team", getSheet],
-    ["PUT", "/api/schedules/:date/:team", putSchedule],
+    ["PUT", "/api/schedules/:date/:team", putScheduleChecked],
     ["POST", "/api/schedules/:date/:team/suggestion", suggestSchedule],
-    ["PUT", "/api/teams/:team/positions", putTeamPositions],
+    ["PUT", "/api/teams/:team/positions", putTeamPositionsLogged],
     ["GET", "/api/history", getHistory],
     ["GET", "/api/users", listUsers],
     ["PUT", "/api/users/:email", putUser],
+    ["PATCH", "/api/users/:email", patchUser],
     ["DELETE", "/api/users/:email", deleteUser],
     ["POST", "/api/users/:email/password", resetPassword],
+    ["PUT", "/api/rules", putRules],
+    ["GET", "/api/activity", listActivity],
   ] as [string, string, Handler][]
 ).map(([method, path, handler]) => ({ method, parts: path.split("/").filter(Boolean), handler }));
 
@@ -494,6 +804,26 @@ async function bodyOf(request: Request): Promise<Body> {
   return body as Body;
 }
 
+/** Bancos já atualizados nesta instância da função (um por conexão). */
+const upgraded = new WeakSet<Sql>();
+
+/**
+ * Login do pedido. Se o banco ainda não tem as colunas que o login lê (versão nova recém-
+ * publicada), aplica a atualização do esquema uma vez e tenta de novo. É no login, antes de
+ * qualquer gravação, que isso aparece, então repetir não grava nada em dobro.
+ */
+async function authenticateUpgrading(request: Request, sql: Sql, opts: AuthOptions): Promise<AuthUser> {
+  try {
+    return await authenticate(request, sql, opts);
+  } catch (e) {
+    if (!isMissingSchema(e) || upgraded.has(sql)) throw e;
+    upgraded.add(sql);
+    console.log("Banco sem as tabelas ou colunas desta versão: aplicando a atualização do esquema.");
+    await upgradeSchema(sql);
+    return authenticate(request, sql, opts);
+  }
+}
+
 export interface HandleOptions extends AuthOptions {
   sql?: Sql;
   /** Só para testes: troca a criação de contas no Neon Auth. */
@@ -513,7 +843,7 @@ export async function handle(request: Request, opts: HandleOptions = {}): Promis
     if (!route) return failure(404, "rota inválida");
 
     const sql = opts.sql ?? db.connect();
-    const user = await authenticate(request, sql, opts);
+    const user = await authenticateUpgrading(request, sql, opts);
     const result = await route.handler({
       sql,
       user,

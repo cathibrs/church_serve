@@ -4,13 +4,13 @@
  * O navegador manda `Authorization: Bearer <JWT>`. Aqui o token é conferido com as
  * chaves públicas do Neon Auth e o acesso só é liberado se o e-mail da conta estiver
  * verificado e constar na tabela app_users, que diz se a pessoa é admin ou coordenador
- * e, para coordenador, de quais equipes.
+ * e, para coordenador, de quais equipes. Acesso suspenso pelo admin é recusado na hora.
  *
  * A liberação é feita aqui, e não na tela, porque o endereço do Neon Auth aceita
  * cadastros de qualquer pessoa: criar uma conta não dá acesso aos dados.
  */
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
-import { getAccess, type Role, type Sql } from "./db.ts";
+import { touchAccess, type Role, type Sql } from "./db.ts";
 
 export class HttpError extends Error {
   readonly status: number;
@@ -106,12 +106,15 @@ export async function authenticate(request: Request, sql: Sql, opts: AuthOptions
 
   const email = account.email.trim().toLowerCase();
   if (!account.verified) throw denied("unverified", "Confirme seu e-mail para entrar.");
-  const access = await getAccess(sql, email);
+  const access = await touchAccess(sql, email);
   if (!access) {
     throw denied("forbidden", `O e-mail ${email} não tem acesso à escala. Peça a liberação a um administrador.`);
+  }
+  if (access.suspended) {
+    throw denied("forbidden", `O acesso de ${email} está suspenso. Fale com um administrador.`);
   }
   if (access.role !== "admin" && !access.teams.length) {
     throw denied("forbidden", `O e-mail ${email} ainda não tem equipe definida. Peça a um administrador.`);
   }
-  return { id: payload.sub, email, ...access };
+  return { id: payload.sub, email, role: access.role, teams: access.teams };
 }

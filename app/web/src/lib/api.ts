@@ -21,14 +21,68 @@ export interface Volunteer {
   can_recepcao: boolean;
   can_banheiro: boolean;
   can_limpar_altar: boolean;
+  /** recado fixo, que aparece na escala */
   observation?: string;
   faltas: number;
   vezes?: number;
   ultima_vez?: string | null;
+  /** observações datadas: quantas há e o texto da mais recente (só na lista do cadastro) */
+  notas?: number;
+  ultima_nota?: string | null;
 }
 
 /** Campos do cadastro (o que se envia ao criar ou alterar um voluntário). */
-export type VolunteerFields = Omit<Volunteer, "id" | "faltas" | "vezes" | "ultima_vez">;
+export type VolunteerFields = Omit<Volunteer, "id" | "faltas" | "vezes" | "ultima_vez" | "notas" | "ultima_nota">;
+
+/** Observação sobre um voluntário, com data e autor. */
+export interface VolunteerNote {
+  id: number;
+  volunteer_id: number;
+  body: string;
+  author: string;
+  author_name: string | null;
+  /** "AAAA-MM-DD HH:MM:SS" (São Paulo) */
+  created_at: string;
+}
+
+/** O que o administrador libera ou trava para os coordenadores. */
+export interface Rules {
+  coordinators_edit_volunteers: boolean;
+  lock_past_schedules: boolean;
+}
+
+/** Uma linha do registro de atividades. */
+export interface ActivityItem {
+  id: number;
+  at: string;
+  actor: string;
+  actor_name: string | null;
+  /** "grupo.ação", ex.: volunteer.update, schedule.save */
+  action: string;
+  target: string | null;
+  team: string | null;
+  summary: string;
+  details: unknown;
+  /** gravações seguidas da mesma coisa juntadas nesta linha */
+  repeats: number;
+}
+
+export interface ActivityPage {
+  items: ActivityItem[];
+  /** id para pedir a página seguinte (null = acabou) */
+  next: number | null;
+  /** todos que aparecem no registro */
+  actors: string[];
+}
+
+export type ActivityGroup = "volunteer" | "note" | "schedule" | "positions" | "user" | "rules";
+
+export interface ActivityFilter {
+  actor?: string;
+  group?: ActivityGroup;
+  team?: string;
+  before?: number;
+}
 
 /** Voluntário como a API devolve depois de gravar (sem os números do histórico). */
 export type SavedVolunteer = VolunteerFields & { id: number };
@@ -56,7 +110,12 @@ export interface Me {
   role: Role;
   /** equipes que a pessoa pode usar (admin: todas) */
   teams: string[];
+  /** regras do administrador para coordenadores */
+  rules: Rules;
 }
+
+/** Coordenador pode alterar o cadastro? (admin sempre pode) */
+export const canEditVolunteers = (me: Me) => me.role === "admin" || me.rules.coordinators_edit_volunteers;
 
 /** Um e-mail com acesso liberado e a situação da conta dele no login. */
 export interface AccessUser {
@@ -69,6 +128,10 @@ export interface AccessUser {
   name: string | null;
   has_account: boolean;
   verified: boolean;
+  /** suspenso: não entra, mas o papel e as equipes ficam guardados */
+  suspended: boolean;
+  /** "AAAA-MM-DD HH:MM:SS"; null se nunca entrou */
+  last_seen_at: string | null;
 }
 
 /** Resultado de liberar um acesso ou gerar senha. `password` vem uma única vez, para o admin repassar. */
@@ -216,6 +279,9 @@ export const api = {
   /** Altera só os campos enviados. */
   updateVolunteer: (id: number, fields: Partial<VolunteerFields>) =>
     request<SavedVolunteer>("PATCH", `/api/volunteers/${id}`, fields),
+  notes: (id: number) => request<VolunteerNote[]>("GET", `/api/volunteers/${id}/notes`),
+  addNote: (id: number, body: string) => request<VolunteerNote>("POST", `/api/volunteers/${id}/notes`, { body }),
+  removeNote: (id: number, noteId: number) => request<null>("DELETE", `/api/volunteers/${id}/notes/${noteId}`),
 
   schedules: (team?: string) => request<ScheduleRow[]>("GET", `/api/schedules${byTeam(team)}`),
   /** Sem equipe, a API escolhe a sugerida para o dia. */
@@ -236,4 +302,15 @@ export const api = {
     request<AccessChange>("PUT", `/api/users/${seg(email)}`, access),
   removeUser: (email: string) => request<null>("DELETE", `/api/users/${seg(email)}`),
   newPassword: (email: string) => request<AccessChange>("POST", `/api/users/${seg(email)}/password`),
+  setSuspended: (email: string, suspended: boolean) =>
+    request<AccessUser>("PATCH", `/api/users/${seg(email)}`, { suspended }),
+  saveRules: (rules: Partial<Rules>) => request<Rules>("PUT", "/api/rules", rules),
+  activity: (filter: ActivityFilter = {}) => {
+    const query = new URLSearchParams(
+      Object.entries(filter)
+        .filter(([, value]) => value !== undefined && value !== "")
+        .map(([key, value]) => [key, String(value)]),
+    ).toString();
+    return request<ActivityPage>("GET", `/api/activity${query ? `?${query}` : ""}`);
+  },
 };

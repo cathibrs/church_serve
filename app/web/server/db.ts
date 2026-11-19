@@ -163,20 +163,33 @@ export async function getRoster(sql: Sql, team: string): Promise<RosterVolunteer
 export interface VolunteerStats extends RosterVolunteer {
   vezes: number;
   ultima_vez: string | null;
+  /** quantas observações datadas a pessoa tem e o texto da mais recente */
+  notas: number;
+  ultima_nota: string | null;
 }
 
-/** Voluntários (ativos e inativos) com faltas, vezes que serviu e a última vez, em uma consulta. */
+/** Voluntários (ativos e inativos) com faltas, vezes que serviu, a última vez e as observações, em uma consulta. */
 export async function getVolunteersWithStats(sql: Sql, teams: Teams = null): Promise<VolunteerStats[]> {
   const rows = await sql.query(
     `SELECT v.*, ${FALTAS},
        (SELECT COUNT(DISTINCT si.schedule_id)::int FROM schedule_items si WHERE si.volunteer_id = v.id) AS vezes,
        (SELECT MAX(s.service_date) FROM schedule_items si JOIN schedules s ON s.id = si.schedule_id
-         WHERE si.volunteer_id = v.id) AS ultima_vez
+         WHERE si.volunteer_id = v.id) AS ultima_vez,
+       (SELECT COUNT(*)::int FROM volunteer_notes n WHERE n.volunteer_id = v.id) AS notas,
+       (SELECT n.body FROM volunteer_notes n WHERE n.volunteer_id = v.id
+         ORDER BY n.created_at DESC, n.id DESC LIMIT 1) AS ultima_nota
      FROM volunteers v WHERE ${VOLUNTEER_SCOPE}`,
     volunteerScope(false, teams),
   );
   return sortByName(
-    rows.map((r) => ({ ...volunteerFromRow(r), faltas: r.faltas, vezes: r.vezes, ultima_vez: r.ultima_vez ?? null })),
+    rows.map((r) => ({
+      ...volunteerFromRow(r),
+      faltas: r.faltas,
+      vezes: r.vezes,
+      ultima_vez: r.ultima_vez ?? null,
+      notas: r.notas,
+      ultima_nota: r.ultima_nota ?? null,
+    })),
   );
 }
 
@@ -185,10 +198,10 @@ export async function getAvailableTeams(sql: Sql): Promise<string[]> {
   return [...new Set([...rows.map((r) => r.team as string), ...TEAM_OPTIONS])].sort();
 }
 
-/** Equipe atual de um voluntário (null se o id não existe). */
-export async function getVolunteerTeam(sql: Sql, id: number): Promise<string | null> {
-  const rows = await sql`SELECT team FROM volunteers WHERE id = ${id}`;
-  return rows.length ? (rows[0].team as string) : null;
+/** Cadastro de um voluntário (null se o id não existe). */
+export async function getVolunteer(sql: Sql, id: number): Promise<Volunteer | null> {
+  const rows = await sql`SELECT * FROM volunteers WHERE id = ${id}`;
+  return rows.length ? volunteerFromRow(rows[0]) : null;
 }
 
 export interface VolunteerInput {
@@ -558,7 +571,12 @@ export interface Access {
   teams: string[];
 }
 
-export interface AppUser extends Access {
+/** Acesso como está gravado: o papel, as equipes e se está suspenso. */
+export interface StoredAccess extends Access {
+  suspended: boolean;
+}
+
+export interface AppUser extends StoredAccess {
   email: string;
   created_at: Date;
   created_by: string | null;
@@ -566,6 +584,8 @@ export interface AppUser extends Access {
   name: string | null;
   has_account: boolean;
   verified: boolean;
+  /** último pedido feito ao sistema (com precisão de alguns minutos); null se nunca entrou */
+  last_seen_at: Date | null;
 }
 
 /** E-mail em minúsculas e sem espaços; erro se não parecer um e-mail. */
@@ -593,22 +613,53 @@ export function cleanTeams(value: unknown, valid: string[]): string[] {
   return [...teams].sort();
 }
 
+const accessFromRow = (r: Row): StoredAccess => ({
+  role: r.role as Role,
+  teams: (r.teams as string[]) ?? [],
+  suspended: r.suspended === true,
+});
+
 /** Acesso de quem está liberado, ou null se o e-mail não está na lista. */
-export async function getAccess(sql: Sql, email: string): Promise<Access | null> {
-  const rows = await sql`SELECT role, teams FROM app_users WHERE email = ${email.trim().toLowerCase()}`;
-  return rows.length ? { role: rows[0].role as Role, teams: (rows[0].teams as string[]) ?? [] } : null;
+export async function getAccess(sql: Sql, email: string): Promise<StoredAccess | null> {
+  const rows = await sql`SELECT role, teams, suspended FROM app_users WHERE email = ${email.trim().toLowerCase()}`;
+  return rows.length ? accessFromRow(rows[0]) : null;
+}
+
+/** Intervalo mínimo entre duas anotações de "último acesso": não grava a cada pedido. */
+const SEEN_EVERY = "5 minutes";
+
+/**
+ * Acesso de quem está fazendo o pedido, anotando o último acesso. É uma ida só ao banco: a
+ * leitura vê a linha como estava antes da anotação, o que não muda o papel nem as equipes.
+ */
+export async function touchAccess(sql: Sql, email: string): Promise<StoredAccess | null> {
+  const key = email.trim().toLowerCase();
+  const rows = await sql.query(
+    `WITH seen AS (
+       UPDATE app_users SET last_seen_at = now()
+       WHERE email = $1 AND NOT suspended
+         AND (last_seen_at IS NULL OR last_seen_at < now() - interval '${SEEN_EVERY}')
+     )
+     SELECT role, teams, suspended FROM app_users WHERE email = $1`,
+    [key],
+  );
+  return rows.length ? accessFromRow(rows[0]) : null;
 }
 
 /** Acessos com a situação da conta de cada e-mail no login. `email`: só o acesso desse e-mail. */
 export async function listAppUsers(sql: Sql, email: string | null = null): Promise<AppUser[]> {
   const rows = await sql`
-    SELECT a.email, a.role, a.teams, a.created_at, a.created_by, u.name,
+    SELECT a.email, a.role, a.teams, a.suspended, a.last_seen_at, a.created_at, a.created_by, u.name,
            (u.email IS NOT NULL) AS has_account, COALESCE(u."emailVerified", false) AS verified
     FROM app_users a
     LEFT JOIN neon_auth."user" u ON lower(u.email) = a.email
     WHERE ${email}::text IS NULL OR a.email = ${email}
     ORDER BY (a.role = 'admin') DESC, a.email`;
   return rows as unknown as AppUser[];
+}
+
+export async function setSuspended(sql: Sql, email: string, suspended: boolean): Promise<void> {
+  await sql`UPDATE app_users SET suspended = ${suspended} WHERE email = ${email}`;
 }
 
 /** Libera um e-mail ou muda o papel e as equipes de quem já está liberado. */
@@ -630,6 +681,179 @@ export async function removeAppUser(sql: Sql, email: string): Promise<void> {
   await sql`DELETE FROM app_users WHERE email = ${email}`;
 }
 
+/** Administradores que conseguem entrar (suspensos não contam). */
 export async function countAdmins(sql: Sql): Promise<number> {
-  return (await sql`SELECT COUNT(*)::int AS n FROM app_users WHERE role = 'admin'`)[0].n;
+  return (await sql`SELECT COUNT(*)::int AS n FROM app_users WHERE role = 'admin' AND NOT suspended`)[0].n;
+}
+
+// ---------------------------------------------------------------- observações dos voluntários
+
+export interface VolunteerNote {
+  id: number;
+  volunteer_id: number;
+  body: string;
+  /** e-mail de quem escreveu */
+  author: string;
+  /** nome da conta de quem escreveu (null se a conta não existe mais) */
+  author_name: string | null;
+  created_at: Date;
+}
+
+export const NOTE_LIMIT = 1000;
+
+const NOTE_COLUMNS = `n.id, n.volunteer_id, n.body, n.author, n.created_at,
+  (SELECT u.name FROM neon_auth."user" u WHERE lower(u.email) = n.author LIMIT 1) AS author_name`;
+
+/** Observações de um voluntário, da mais recente para a mais antiga. */
+export async function listNotes(sql: Sql, volunteerId: number): Promise<VolunteerNote[]> {
+  const rows = await sql.query(
+    `SELECT ${NOTE_COLUMNS} FROM volunteer_notes n WHERE n.volunteer_id = $1 ORDER BY n.created_at DESC, n.id DESC`,
+    [volunteerId],
+  );
+  return rows as unknown as VolunteerNote[];
+}
+
+export async function addNote(sql: Sql, volunteerId: number, body: unknown, author: string): Promise<VolunteerNote> {
+  const text = cleanText(body, NOTE_LIMIT);
+  if (!text) throw new UserError("Escreva a observação.");
+  const rows = await sql.query(
+    `WITH n AS (
+       INSERT INTO volunteer_notes (volunteer_id, body, author) VALUES ($1, $2, $3) RETURNING *
+     )
+     SELECT ${NOTE_COLUMNS} FROM n`,
+    [volunteerId, text, author],
+  );
+  return rows[0] as VolunteerNote;
+}
+
+/** Uma observação (null se não existe ou é de outro voluntário). */
+export async function getNote(sql: Sql, volunteerId: number, id: number): Promise<VolunteerNote | null> {
+  const rows = await sql.query(`SELECT ${NOTE_COLUMNS} FROM volunteer_notes n WHERE n.id = $1 AND n.volunteer_id = $2`, [
+    id,
+    volunteerId,
+  ]);
+  return (rows[0] as VolunteerNote | undefined) ?? null;
+}
+
+export async function removeNote(sql: Sql, id: number): Promise<void> {
+  await sql`DELETE FROM volunteer_notes WHERE id = ${id}`;
+}
+
+// ---------------------------------------------------------------- registro de atividades
+
+export interface ActivityInput {
+  actor: string;
+  /** "grupo.ação": volunteer.create, note.add, schedule.save, user.suspend... */
+  action: string;
+  /** o que foi mexido; com `merge`, junta gravações seguidas da mesma coisa */
+  target?: string | null;
+  team?: string | null;
+  summary: string;
+  details?: unknown;
+}
+
+export interface ActivityRow {
+  id: number;
+  at: Date;
+  actor: string;
+  actor_name: string | null;
+  action: string;
+  target: string | null;
+  team: string | null;
+  summary: string;
+  details: unknown;
+  repeats: number;
+}
+
+/**
+ * Anota uma atividade. Com `merge`, se a mesma pessoa mexeu na mesma coisa há menos que esse
+ * tempo, a linha anterior é atualizada em vez de criar outra: a escala salva sozinha a cada
+ * troca, e o registro mostraria dezenas de linhas iguais.
+ */
+export async function logActivity(sql: Sql, entry: ActivityInput, merge?: "30 minutes"): Promise<void> {
+  const details = entry.details === undefined ? null : JSON.stringify(entry.details);
+  const values = [entry.actor, entry.action, entry.target ?? null, entry.team ?? null, entry.summary, details];
+  if (!merge || !entry.target) {
+    await sql.query(
+      `INSERT INTO activity_log (actor, action, target, team, summary, details) VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+      values,
+    );
+    return;
+  }
+  await sql.query(
+    `WITH last AS (
+       SELECT id FROM activity_log
+       WHERE actor = $1 AND action = $2 AND target = $3 AND at > now() - interval '${merge}'
+       ORDER BY id DESC LIMIT 1
+     ), bumped AS (
+       UPDATE activity_log a SET at = now(), summary = $5, details = $6::jsonb, repeats = a.repeats + 1
+       FROM last WHERE a.id = last.id RETURNING a.id
+     )
+     INSERT INTO activity_log (actor, action, target, team, summary, details)
+     SELECT $1, $2, $3, $4, $5, $6::jsonb WHERE NOT EXISTS (SELECT 1 FROM bumped)`,
+    values,
+  );
+}
+
+export interface ActivityFilter {
+  actor?: string | null;
+  /** grupo de ações ("volunteer", "schedule"...) */
+  group?: string | null;
+  team?: string | null;
+  /** só linhas com id menor que este (próxima página) */
+  before?: number | null;
+  limit?: number;
+}
+
+/** Atividades da mais recente para a mais antiga, com o nome de quem fez. */
+export async function listActivity(sql: Sql, f: ActivityFilter = {}): Promise<ActivityRow[]> {
+  const rows = await sql.query(
+    `SELECT a.id::int AS id, a.at, a.actor, a.action, a.target, a.team, a.summary, a.details, a.repeats,
+       (SELECT u.name FROM neon_auth."user" u WHERE lower(u.email) = a.actor LIMIT 1) AS actor_name
+     FROM activity_log a
+     WHERE ($1::text IS NULL OR a.actor = $1)
+       AND ($2::text IS NULL OR a.action LIKE $2 || '.%')
+       AND ($3::text IS NULL OR ${teamKeySql("a.team")} = $3)
+       AND ($4::bigint IS NULL OR a.id < $4)
+     ORDER BY a.id DESC LIMIT $5`,
+    [f.actor ?? null, f.group ?? null, f.team ? teamKeys([f.team])[0] : null, f.before ?? null, f.limit ?? 50],
+  );
+  return rows as unknown as ActivityRow[];
+}
+
+/** Quem aparece no registro (para o filtro da tela). */
+export async function activityActors(sql: Sql): Promise<string[]> {
+  const rows = await sql`SELECT DISTINCT actor FROM activity_log ORDER BY actor`;
+  return rows.map((r) => r.actor as string);
+}
+
+// ---------------------------------------------------------------- regras para coordenadores
+
+/** O que o administrador libera ou trava para os coordenadores. */
+export interface Rules {
+  /** coordenador cadastra e altera voluntários das equipes dele */
+  coordinators_edit_volunteers: boolean;
+  /** coordenador não altera escalas de cultos que já passaram */
+  lock_past_schedules: boolean;
+}
+
+export const DEFAULT_RULES: Rules = { coordinators_edit_volunteers: true, lock_past_schedules: false };
+const RULES_KEY = "regras_coordenadores";
+
+export async function getRules(sql: Sql): Promise<Rules> {
+  const saved = (await getMetaMany(sql, [RULES_KEY])).get(RULES_KEY) as Partial<Rules> | undefined;
+  return { ...DEFAULT_RULES, ...(saved && typeof saved === "object" ? saved : {}) };
+}
+
+/** Grava só as regras conhecidas que vierem no pedido; as outras ficam como estão. */
+export async function setRules(sql: Sql, input: Record<string, unknown>): Promise<Rules> {
+  const current = await getRules(sql);
+  const next = { ...current };
+  for (const key of Object.keys(DEFAULT_RULES) as (keyof Rules)[]) {
+    if (input[key] === undefined) continue;
+    if (typeof input[key] !== "boolean") throw new UserError("Regra inválida.");
+    next[key] = input[key];
+  }
+  await setMeta(sql, RULES_KEY, next);
+  return next;
 }

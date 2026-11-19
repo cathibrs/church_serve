@@ -104,6 +104,22 @@ Daí em diante é tudo pelo site, na tela Acessos:
 - **Gerar nova senha** (ícone de chave na linha) serve para quando a senha se perde: a anterior
   deixa de valer, a pessoa é desconectada e a nova aparece para o administrador.
 - **Remover** um e-mail bloqueia a pessoa na hora; não é preciso publicar o site de novo.
+- **Suspender** também bloqueia na hora, mas guarda o papel e as equipes: **Reativar** devolve tudo
+  como estava. Serve para quem se afastou por um tempo.
+- A coluna **Último acesso** mostra quando cada pessoa usou o sistema pela última vez (anotado a
+  cada 5 minutos de uso, no máximo).
+- **Regras para coordenadores**, no topo da tela, valem para todos os coordenadores e gravam na
+  hora:
+  - *Coordenadores podem alterar o cadastro de voluntários*: desligado, eles só veem o cadastro e
+    escrevem observações; quem cadastra e muda permissões é o administrador.
+  - *Travar escalas de cultos que já passaram*: ligado, coordenadores não mudam a escala nem a
+    presença depois do dia do culto. A sugestão (que não grava) continua liberada.
+
+A tela **Atividade** (só administrador) mostra quem fez o quê: escalas salvas, cadastros e
+alterações de voluntários (com o que mudou), observações escritas e apagadas, posições padrão,
+acessos e regras. Filtra por pessoa, tipo e equipe. Como a escala salva sozinha a cada troca, as
+gravações seguidas do mesmo culto pela mesma pessoa, em até 30 minutos, viram uma linha só ("salvo
+14 vezes").
 
 A tela de login não tem "criar conta". O serviço de login do Neon ainda aceita cadastros feitos
 direto no endereço dele, mas uma conta assim não entra no sistema: a API só atende e-mails
@@ -147,7 +163,8 @@ outra pessoa (o botão voltar do navegador também funciona):
 | `/escala/2026-12-06/Domingo_Manha_A` | Escala desse dia e dessa equipe. |
 | `/voluntarios` | Cadastro de voluntários. |
 | `/historico` e `/historico/Domingo_Manha_A` | Histórico e faltas, de todas as equipes ou de uma. |
-| `/acessos` | Quem pode entrar (só administrador). |
+| `/acessos` | Quem pode entrar e regras para coordenadores (só administrador). |
+| `/atividade` | Registro de quem fez o quê (só administrador). |
 
 **Os dados chegam antes de a tela aparecer.** Nenhuma tela é desenhada vazia para ser preenchida
 depois ([`src/lib/screens.ts`](src/lib/screens.ts)):
@@ -170,10 +187,13 @@ acesso, 404 não existe).
 | Verbo e endereço | O que faz |
 | --- | --- |
 | `GET /api/config` | Endereço do login (público). |
-| `GET /api/me` | Quem está logado, o papel e as equipes. |
-| `GET /api/volunteers[?team=]` | Voluntários, com faltas, vezes que serviram e a última vez. |
+| `GET /api/me` | Quem está logado, o papel, as equipes e as regras para coordenadores. |
+| `GET /api/volunteers[?team=]` | Voluntários, com faltas, vezes que serviram, a última vez e as observações (quantas e a mais recente). |
 | `POST /api/volunteers` | Cadastra um voluntário (201). |
 | `PATCH /api/volunteers/:id` | Altera só os campos enviados. |
+| `GET /api/volunteers/:id/notes` | Observações do voluntário, da mais recente para a mais antiga. |
+| `POST /api/volunteers/:id/notes` | Escreve uma observação (201). Vale mesmo com o cadastro travado. |
+| `DELETE /api/volunteers/:id/notes/:nota` | Apaga uma observação: quem escreveu ou um administrador (204). |
 | `GET /api/schedules[?team=]` | Escalas salvas (data, equipe, posições e faltas). |
 | `GET /api/schedules/:data[/:equipe]` | Folha do culto: equipe, posições padrão, escala salva e regras quebradas. Sem equipe, usa a sugerida para o dia. |
 | `PUT /api/schedules/:data/:equipe` | Grava a escala do culto (substitui a anterior) e devolve as regras quebradas. |
@@ -182,8 +202,16 @@ acesso, 404 não existe).
 | `GET /api/history[?team=]` | Quantas vezes cada voluntário ativo serviu em cada função, e as faltas. |
 | `GET /api/users` | Acessos liberados (só administrador). |
 | `PUT /api/users/:email` | Libera um e-mail (201, com a senha criada) ou muda papel e equipes (200). |
+| `PATCH /api/users/:email` | Suspende ou reativa o acesso (`{ "suspended": true }`). |
 | `DELETE /api/users/:email` | Remove o acesso (204). |
 | `POST /api/users/:email/password` | Gera uma senha nova (201). |
+| `PUT /api/rules` | Regras para coordenadores (só administrador). |
+| `GET /api/activity[?actor=&group=&team=&before=]` | Registro de atividades, 50 por página (só administrador). |
+
+**Banco que se atualiza sozinho.** Quando uma versão nova precisa de tabelas ou colunas novas, não
+é preciso rodar nada à mão: no primeiro pedido, se o login esbarrar numa coluna que falta, a API
+aplica os comandos de [`server/upgrade.ts`](server/upgrade.ts) (os mesmos do fim de
+`db/schema.sql`, que podem rodar mais de uma vez) e segue.
 
 Como o sistema fica leve:
 

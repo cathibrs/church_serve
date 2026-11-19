@@ -4,21 +4,34 @@
  *   /escala[/:data[/:equipe]]   folha do culto (sem data: o próximo culto; sem equipe: a sugerida)
  *   /voluntarios                cadastro
  *   /historico[/:equipe]        histórico e faltas
- *   /acessos                    quem pode entrar (só administrador)
+ *   /acessos                    quem pode entrar e regras para coordenadores (só administrador)
+ *   /atividade                  registro de quem fez o quê (só administrador)
  *
  * Os dados são pedidos ANTES de a tela aparecer: ao trocar de tela, a anterior continua
  * visível até a nova estar completa, então nenhuma tela é desenhada vazia para ser
  * preenchida depois. Passar o mouse no menu já adianta o pedido.
  */
-import { api, type AccessUser, type HistoryRow, type ScheduleRow, type Sheet, type Volunteer } from "./api";
+import {
+  api,
+  type AccessUser,
+  type ActivityPage,
+  type HistoryRow,
+  type ScheduleRow,
+  type Sheet,
+  type Volunteer,
+} from "./api";
 
 export type Route =
   | { page: "escala"; date?: string; team?: string }
   | { page: "voluntarios" }
   | { page: "historico"; team?: string }
-  | { page: "acessos" };
+  | { page: "acessos" }
+  | { page: "atividade" };
 
 export type Page = Route["page"];
+
+/** Telas que só o administrador abre. */
+export const ADMIN_PAGES: Page[] = ["acessos", "atividade"];
 
 /** O que cada tela recebe pronto. */
 export interface ScreenData {
@@ -26,6 +39,7 @@ export interface ScreenData {
   voluntarios: Volunteer[];
   historico: { people: HistoryRow[]; schedules: ScheduleRow[] };
   acessos: AccessUser[];
+  atividade: ActivityPage;
 }
 
 /** Tela pronta para aparecer: o endereço e os dados dela, já carregados. */
@@ -65,6 +79,7 @@ export function parse(where: { pathname: string; hash: string } = location): Rou
       return { page, team: decode(a) };
     case "voluntarios":
     case "acessos":
+    case "atividade":
       return { page };
   }
   // endereços antigos, de quando a tela ficava depois do "#"
@@ -109,6 +124,8 @@ async function fetchScreen(route: Route): Promise<Screen> {
     }
     case "acessos":
       return { page: "acessos", route, data: await api.users() };
+    case "atividade":
+      return { page: "atividade", route, data: await api.activity() };
   }
 }
 

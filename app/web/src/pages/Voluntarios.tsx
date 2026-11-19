@@ -1,7 +1,31 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { ArrowDown, ArrowUp, ChevronsUpDown, FilterX, ListFilter, Pencil, Plus, Search, StickyNote, Users } from "lucide-react";
-import { api, type Me, type SavedVolunteer, type Volunteer, type VolunteerFields } from "@/lib/api";
+import {
+  ArrowDown,
+  ArrowUp,
+  ChevronsUpDown,
+  Eye,
+  FilterX,
+  ListFilter,
+  Loader2,
+  Lock,
+  MessageSquareText,
+  Pencil,
+  Plus,
+  Search,
+  StickyNote,
+  Trash2,
+  Users,
+} from "lucide-react";
+import {
+  api,
+  canEditVolunteers,
+  type Me,
+  type SavedVolunteer,
+  type Volunteer,
+  type VolunteerFields,
+  type VolunteerNote,
+} from "@/lib/api";
 import { br, cn, normalize, teamLabel } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -83,7 +107,10 @@ export function VoluntariosPage({
     const nq = normalize(q);
     const r = list.filter(
       (v) =>
-        (!nq || normalize(v.name).includes(nq) || normalize(v.observation ?? "").includes(nq)) &&
+        (!nq ||
+          normalize(v.name).includes(nq) ||
+          normalize(v.observation ?? "").includes(nq) ||
+          normalize(v.ultima_nota ?? "").includes(nq)) &&
         (team === "all" || v.team === team) &&
         (gender === "all" || v.gender === gender) &&
         (status === "all" || (status === "active" ? v.active : !v.active)) &&
@@ -116,6 +143,13 @@ export function VoluntariosPage({
       const next: Volunteer = { faltas: 0, vezes: 0, ultima_vez: null, ...old, ...saved };
       return old ? l.map((x) => (x.id === saved.id ? next : x)) : [...l, next];
     });
+
+  /** O admin pode travar o cadastro para coordenadores: aí a tela só mostra (e aceita observações). */
+  const editable = canEditVolunteers(me);
+
+  /** Atualiza na lista o número de observações e a mais recente, depois de escrever ou apagar. */
+  const noteCount = (id: number, notes: VolunteerNote[]) =>
+    setList((l) => l.map((x) => (x.id === id ? { ...x, notas: notes.length, ultima_nota: notes[0]?.body ?? null } : x)));
 
   /** Marca na hora e envia só o campo que mudou. */
   const quickSave = async (v: Volunteer, patch: Partial<VolunteerFields>) => {
@@ -157,16 +191,27 @@ export function VoluntariosPage({
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex flex-wrap items-center gap-2 border-b bg-background/85 px-3 py-2.5 backdrop-blur md:px-5">
         <div className="mr-auto">
-          <h1 className="text-[15px] leading-tight font-semibold">Voluntários</h1>
+          <h1 className="text-lg leading-tight font-semibold">Voluntários</h1>
           <p className="text-xs text-muted-foreground">
             {stats.total} ativos · {stats.f} mulheres · {stats.m} homens ·{" "}
             <b className="font-medium text-foreground">{rows.length} na lista</b>
           </p>
+          <p className="text-xs text-muted-foreground">
+            Toque no nome para ver e editar o cadastro. As caixinhas e a chave "Ativo" salvam na hora; "Ativo" desligado = a pessoa não entra nas próximas escalas.
+          </p>
         </div>
-        <Button onClick={() => setEdit({ ...EMPTY, team: team !== "all" ? team : (me.teams[0] ?? "") })}>
-          <Plus /> Novo voluntário
-        </Button>
+        {editable && (
+          <Button onClick={() => setEdit({ ...EMPTY, team: team !== "all" ? team : (me.teams[0] ?? "") })}>
+            <Plus /> Novo voluntário
+          </Button>
+        )}
       </header>
+      {!editable && (
+        <p className="flex items-center gap-2 border-b bg-warning-soft px-3 py-2 text-sm md:px-5">
+          <Lock className="size-4 shrink-0" />
+          O administrador travou o cadastro: você pode ver os dados e escrever observações, mas não alterar.
+        </p>
+      )}
 
       {/* filtros — no celular: busca e "Filtros" em cima; equipe e os dois seletores numa faixa de arrastar */}
       <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2.5 md:px-5">
@@ -220,12 +265,12 @@ export function VoluntariosPage({
               )}
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-56">
+          <DropdownMenuContent align="start" className="w-72">
             <DropdownMenuCheckboxItem checked={withAbs} onCheckedChange={(c) => setWithAbs(!!c)}>
-              Somente quem tem faltas
+              Mostrar só quem tem faltas
             </DropdownMenuCheckboxItem>
             <DropdownMenuSeparator />
-            <DropdownMenuLabel>Pode servir em</DropdownMenuLabel>
+            <DropdownMenuLabel>Mostrar só quem pode servir em</DropdownMenuLabel>
             {PERMS.map(([k, l]) => (
               <DropdownMenuCheckboxItem
                 key={k}
@@ -242,7 +287,7 @@ export function VoluntariosPage({
               </DropdownMenuCheckboxItem>
             ))}
             <DropdownMenuSeparator />
-            <DropdownMenuLabel>Não pode servir em</DropdownMenuLabel>
+            <DropdownMenuLabel>Mostrar só quem não pode servir em</DropdownMenuLabel>
             {PERMS.map(([k, l]) => (
               <DropdownMenuCheckboxItem
                 key={"!" + k}
@@ -262,7 +307,7 @@ export function VoluntariosPage({
         </DropdownMenu>
         {filtersOn ? (
           <Button variant="ghost" onClick={clearFilters}>
-            <FilterX /> Limpar
+            <FilterX /> Limpar filtros
           </Button>
         ) : null}
       </div>
@@ -277,7 +322,12 @@ export function VoluntariosPage({
                   <span className="flex items-center gap-2 text-sm font-medium">
                     <i className={cn("size-2 shrink-0 rounded-full", v.gender === "Feminino" ? "bg-rose-500" : "bg-sky-600")} />
                     <span className="truncate">{v.name}</span>
-                    {v.observation && <StickyNote className="size-3 shrink-0 text-amber-600" aria-label="Tem observação" />}
+                    {v.observation && <StickyNote className="size-3 shrink-0 text-amber-600" aria-label="Tem recado" />}
+                    {!!v.notas && (
+                      <span className="flex shrink-0 items-center gap-0.5 text-xs font-normal text-muted-foreground">
+                        <MessageSquareText className="size-3" aria-label="Observações" /> {v.notas}
+                      </span>
+                    )}
                   </span>
                   <span className="mt-0.5 flex items-center gap-2 pl-4 text-xs text-muted-foreground">
                     <span className="truncate">{teamLabel(v.team)}</span>
@@ -292,6 +342,7 @@ export function VoluntariosPage({
                 <label className="-mr-2.5 flex cursor-pointer items-center p-2.5">
                   <Switch
                     checked={v.active}
+                    disabled={!editable}
                     onCheckedChange={(c) => quickSave(v, { active: c })}
                     aria-label={`${v.name}: ativo`}
                   />
@@ -300,27 +351,39 @@ export function VoluntariosPage({
             ))}
             {!rows.length && <li className="py-12 text-center text-muted-foreground">Nenhum voluntário com esses filtros.</li>}
           </ul>
-          <table className="w-full border-collapse text-[13px] max-md:hidden">
+          <table className="w-full border-collapse text-sm max-md:hidden">
             <thead className="sticky top-0 z-10 bg-muted/80 text-left text-xs text-muted-foreground backdrop-blur">
+              {/* o grupo deixa claro o que as caixinhas querem dizer */}
+              <tr className="h-7">
+                <th colSpan={2} />
+                <th colSpan={3} className="border-x border-b px-1 text-center font-semibold text-foreground">
+                  No histórico
+                </th>
+                <th />
+                <th colSpan={PERMS.length} className="border-x border-b px-1 text-center font-semibold text-foreground">
+                  Pode servir em
+                </th>
+                <th colSpan={2} />
+              </tr>
               <tr className="h-9 [&>th]:font-medium">
                 {th("name", "Nome", "pl-4")}
                 {th("team", "Equipe")}
                 {th("faltas", "Faltas", "text-center")}
-                {th("vezes", "Serviu", "text-center")}
+                {th("vezes", "Serviu (vezes)", "text-center whitespace-nowrap")}
                 {th("ultima_vez", "Última vez", "whitespace-nowrap")}
-                <th className="px-2">Observação</th>
+                <th className="px-2">Recado e observações</th>
                 {PERMS.map(([k, l]) => (
-                  <th key={k} className="w-[70px] px-1 text-center">
+                  <th key={k} className="w-[64px] px-1 text-center">
                     {l}
                   </th>
                 ))}
                 <th className="w-[60px] px-1 text-center">Ativo</th>
-                <th className="w-10" />
+                <th className="w-24" />
               </tr>
             </thead>
             <tbody>
               {rows.map((v) => (
-                <tr key={v.id} className={cn("h-9 border-t transition-colors hover:bg-muted/40", !v.active && "text-muted-foreground")}>
+                <tr key={v.id} className={cn("h-11 border-t transition-colors hover:bg-muted/40", !v.active && "text-muted-foreground")}>
                   <td className="pl-4 font-medium whitespace-nowrap">
                     <button className="inline-flex items-center gap-2 hover:underline" onClick={() => setEdit(v)} title={v.gender}>
                       <i className={cn("size-2 shrink-0 rounded-full", v.gender === "Feminino" ? "bg-rose-500" : "bg-sky-600")} />
@@ -333,14 +396,24 @@ export function VoluntariosPage({
                   </td>
                   <td className="px-2 text-center tabular-nums">{v.vezes || <span className="text-muted-foreground/50">0</span>}</td>
                   <td className="px-2 tabular-nums">{br(v.ultima_vez) || <span className="text-muted-foreground/50">—</span>}</td>
-                  <td className="max-w-[260px] px-2">
-                    {v.observation ? (
+                  <td className="max-w-[240px] min-w-[140px] px-2 py-1">
+                    {v.observation || v.notas ? (
                       <button
-                        className="block w-full truncate text-left text-xs text-muted-foreground hover:text-foreground"
-                        title={v.observation}
+                        className="w-full text-left text-xs text-muted-foreground hover:text-foreground"
                         onClick={() => setEdit(v)}
                       >
-                        {v.observation}
+                        {v.observation && (
+                          <span className="line-clamp-2">
+                            <StickyNote className="mr-1 inline size-3 align-[-1px] text-amber-600" />
+                            {v.observation}
+                          </span>
+                        )}
+                        {!!v.notas && (
+                          <span className="line-clamp-1" title={v.ultima_nota ?? undefined}>
+                            <MessageSquareText className="mr-1 inline size-3 align-[-1px]" />
+                            {v.notas} obs. · {v.ultima_nota}
+                          </span>
+                        )}
                       </button>
                     ) : (
                       <span className="text-muted-foreground/50">—</span>
@@ -350,17 +423,31 @@ export function VoluntariosPage({
                     <td key={k} className="px-1 text-center">
                       <Checkbox
                         checked={v[k]}
+                        disabled={!editable}
                         onCheckedChange={(c) => quickSave(v, { [k]: !!c })}
-                        aria-label={k}
+                        aria-label={`${v.name} pode servir em ${PERMS.find(([p]) => p === k)?.[1]}`}
                       />
                     </td>
                   ))}
                   <td className="px-1 text-center">
-                    <Switch checked={v.active} onCheckedChange={(c) => quickSave(v, { active: c })} />
+                    <Switch
+                      checked={v.active}
+                      disabled={!editable}
+                      onCheckedChange={(c) => quickSave(v, { active: c })}
+                      aria-label={`${v.name}: ativo`}
+                    />
                   </td>
                   <td className="pr-2 text-right">
-                    <Button variant="ghost" size="icon-xs" onClick={() => setEdit(v)}>
-                      <Pencil />
+                    <Button variant="outline" size="xs" onClick={() => setEdit(v)}>
+                      {editable ? (
+                        <>
+                          <Pencil /> Editar
+                        </>
+                      ) : (
+                        <>
+                          <Eye /> Ver
+                        </>
+                      )}
                     </Button>
                   </td>
                 </tr>
@@ -379,7 +466,9 @@ export function VoluntariosPage({
 
       <VolunteerSheet
         value={edit}
-        teams={me.teams}
+        me={me}
+        editable={editable}
+        onNotes={noteCount}
         onClose={() => setEdit(null)}
         onSaved={(saved) => {
           setEdit(null);
@@ -392,15 +481,21 @@ export function VoluntariosPage({
 
 function VolunteerSheet({
   value,
-  teams,
+  me,
+  editable,
+  onNotes,
   onClose,
   onSaved,
 }: {
   value: Partial<Volunteer> | null;
-  teams: string[];
+  me: Me;
+  /** false: o admin travou o cadastro; os campos só aparecem, mas observações continuam liberadas */
+  editable: boolean;
+  onNotes: (id: number, notes: VolunteerNote[]) => void;
   onClose: () => void;
   onSaved: (saved: SavedVolunteer) => void;
 }) {
+  const teams = me.teams;
   const [f, setF] = useState<Partial<Volunteer>>(EMPTY);
   useEffect(() => {
     if (value) setF(value);
@@ -408,6 +503,7 @@ function VolunteerSheet({
   const set = (patch: Partial<Volunteer>) => setF((x) => ({ ...x, ...patch }));
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!editable) return;
     try {
       const fields = Object.fromEntries(FIELDS.map((k) => [k, f[k]])) as Partial<VolunteerFields>;
       const saved = f.id ? await api.updateVolunteer(f.id, fields) : await api.createVolunteer(fields);
@@ -419,9 +515,14 @@ function VolunteerSheet({
   };
   return (
     <Sheet open={!!value} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent title={f.id ? "Editar voluntário" : "Novo voluntário"} description="Os dados valem para as próximas escalas.">
+      <SheetContent
+        title={!f.id ? "Novo voluntário" : editable ? "Editar voluntário" : (f.name ?? "Voluntário")}
+        description={editable ? "Os dados valem para as próximas escalas." : "Cadastro travado pelo administrador: só observações."}
+      >
         <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
           <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
+            {/* cadastro travado: o fieldset desliga todos os campos de uma vez */}
+            <fieldset disabled={!editable} className="min-w-0 space-y-4 disabled:opacity-80">
             <div className="space-y-1.5">
               <FieldLabel>Nome</FieldLabel>
               <Input autoFocus value={f.name ?? ""} onChange={(e) => set({ name: e.target.value })} required />
@@ -467,30 +568,192 @@ function VolunteerSheet({
               </div>
             </div>
             <div className="space-y-1.5">
-              <FieldLabel>Observações</FieldLabel>
+              <FieldLabel>Recado para a escala</FieldLabel>
               <textarea
                 value={f.observation ?? ""}
                 onChange={(e) => set({ observation: e.target.value })}
                 rows={3}
                 maxLength={500}
                 placeholder="Ex.: só pode até as 10h; prefere não ficar na cozinha; gestante…"
-                className="flex w-full min-w-0 resize-y rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs outline-none placeholder:text-muted-foreground/70 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/25"
+                className={TEXTAREA}
               />
-              <p className="text-xs text-muted-foreground">Aparece na presença e na lista de troca da escala.</p>
+              <p className="text-xs text-muted-foreground">
+                Fica fixo e aparece na presença e na lista de troca da escala. Para registrar algo com data, use as
+                observações abaixo.
+              </p>
             </div>
             <Label className="h-10 justify-between rounded-lg border px-3 font-normal">
               Ativo (entra nas escalas)
               <Switch checked={!!f.active} onCheckedChange={(c) => set({ active: c })} />
             </Label>
+            </fieldset>
+            {f.id ? (
+              <NotesPanel key={f.id} volunteerId={f.id} me={me} onChange={(notes) => onNotes(f.id!, notes)} />
+            ) : (
+              <p className="rounded-lg border border-dashed px-3 py-2.5 text-xs text-muted-foreground">
+                Depois de salvar o cadastro, você pode registrar observações com data sobre a pessoa.
+              </p>
+            )}
           </div>
           <div className="flex justify-end gap-2 border-t px-5 py-3">
             <Button type="button" variant="outline" onClick={onClose}>
-              Cancelar
+              {editable ? "Cancelar" : "Fechar"}
             </Button>
-            <Button type="submit">Salvar</Button>
+            {editable && <Button type="submit">Salvar</Button>}
           </div>
         </form>
       </SheetContent>
     </Sheet>
+  );
+}
+
+const TEXTAREA =
+  "flex w-full min-w-0 resize-y rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs outline-none placeholder:text-muted-foreground/70 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-60";
+
+/** "AAAA-MM-DD HH:MM:SS" -> "dd/mm/aaaa às HH:MM" */
+const when = (stamp: string) => `${br(stamp.slice(0, 10))} às ${stamp.slice(11, 16)}`;
+
+/**
+ * Observações datadas sobre a pessoa: quem escreveu e quando. Ficam guardadas (não somem ao
+ * escrever outra) e cada uma pode ser apagada por quem escreveu ou por um administrador.
+ * Valem mesmo com o cadastro travado: escrever não muda a escala.
+ */
+function NotesPanel({
+  volunteerId,
+  me,
+  onChange,
+}: {
+  volunteerId: number;
+  me: Me;
+  onChange: (notes: VolunteerNote[]) => void;
+}) {
+  const [notes, setNotes] = useState<VolunteerNote[] | null>(null);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState<number | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .notes(volunteerId)
+      .then((list) => alive && setNotes(list))
+      .catch((e) => {
+        if (!alive) return;
+        setNotes([]);
+        toast.error((e as Error).message);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [volunteerId]);
+
+  const update = (next: VolunteerNote[]) => {
+    setNotes(next);
+    onChange(next);
+  };
+
+  const add = async () => {
+    const body = text.trim();
+    if (!body || busy) return;
+    setBusy(true);
+    try {
+      const note = await api.addNote(volunteerId, body);
+      update([note, ...(notes ?? [])]);
+      setText("");
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (id: number) => {
+    setConfirming(null);
+    setBusy(true);
+    try {
+      await api.removeNote(volunteerId, id);
+      update((notes ?? []).filter((n) => n.id !== id));
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="space-y-2 border-t pt-4" aria-label="Observações">
+      <div className="flex items-baseline justify-between gap-2">
+        <FieldLabel>Observações</FieldLabel>
+        {notes && notes.length > 0 && <span className="text-xs text-muted-foreground">{notes.length} registrada(s)</span>}
+      </div>
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            add();
+          }
+        }}
+        rows={2}
+        maxLength={1000}
+        placeholder="Ex.: avisou que viaja em janeiro; chegou atrasada no culto de domingo; conversamos sobre…"
+        className={TEXTAREA}
+        aria-label="Nova observação"
+      />
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs text-muted-foreground">Fica registrada com data e o seu nome.</p>
+        <Button type="button" size="sm" variant="outline" disabled={!text.trim() || busy} onClick={add}>
+          {busy ? <Loader2 className="animate-spin" /> : <Plus />} Registrar
+        </Button>
+      </div>
+
+      {notes === null ? (
+        <p className="flex items-center gap-2 py-3 text-xs text-muted-foreground">
+          <Loader2 className="size-3.5 animate-spin" /> Carregando observações…
+        </p>
+      ) : notes.length === 0 ? (
+        <p className="py-2 text-xs text-muted-foreground">Nenhuma observação registrada ainda.</p>
+      ) : (
+        <ol className="space-y-2">
+          {notes.map((n) => {
+            const canRemove = n.author === me.email || me.role === "admin";
+            return (
+              <li key={n.id} className="rounded-lg border bg-muted/30 px-3 py-2">
+                <p className="text-sm whitespace-pre-wrap break-words">{n.body}</p>
+                <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+                  <span className="min-w-0 flex-1 truncate" title={n.author}>
+                    {n.author === me.email ? "Você" : (n.author_name ?? n.author)} · {when(n.created_at)}
+                  </span>
+                  {canRemove &&
+                    (confirming === n.id ? (
+                      <span className="flex shrink-0 items-center gap-1">
+                        Apagar?
+                        <Button type="button" size="xs" variant="destructive" disabled={busy} onClick={() => remove(n.id)}>
+                          Sim
+                        </Button>
+                        <Button type="button" size="xs" variant="ghost" onClick={() => setConfirming(null)}>
+                          Não
+                        </Button>
+                      </span>
+                    ) : (
+                      <Button
+                        type="button"
+                        size="xs"
+                        variant="ghost"
+                        className="shrink-0 text-muted-foreground hover:text-destructive"
+                        aria-label="Apagar observação"
+                        onClick={() => setConfirming(n.id)}
+                      >
+                        <Trash2 /> Apagar
+                      </Button>
+                    ))}
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </section>
   );
 }
