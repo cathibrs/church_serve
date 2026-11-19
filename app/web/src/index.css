@@ -74,6 +74,10 @@
 @layer base {
   * { @apply border-border outline-ring/50; }
   html, body, #root { height: 100%; }
+  /* na tela, dvh: no celular a altura acompanha a barra de endereço do navegador */
+  @media screen {
+    html, body, #root { height: 100dvh; }
+  }
   body {
     @apply bg-background text-foreground antialiased;
     font-feature-settings: "cv11", "ss01";
@@ -94,8 +98,17 @@
 
 /* Mapa SVG */
 .map-svg .slot { cursor: pointer; }
-.map-svg .slot:hover .hit { fill: oklch(0.145 0 0 / 0.06); }
-.map-svg .slot:hover .nm, .map-svg .slot:hover .rn { fill: oklch(0.35 0 0); }
+/* só com mouse: no toque o destaque ficaria preso na última posição tocada */
+@media (hover: hover) {
+  .map-svg .slot:hover .hit { fill: oklch(0.145 0 0 / 0.06); }
+  .map-svg .slot:hover .nm, .map-svg .slot:hover .rn { fill: oklch(0.35 0 0); }
+}
+
+/* Celular: campo com letra menor que 16px faz o iOS dar zoom na página ao focar.
+   Fica fora das camadas do Tailwind para valer sobre os tamanhos de texto das classes. */
+@media (max-width: 767px) and (pointer: coarse) {
+  input, select, textarea { font-size: 16px; }
+}
 
 @media print {
   @page { size: A4 landscape; margin: 8mm; }

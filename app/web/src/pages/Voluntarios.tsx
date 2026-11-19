@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { ArrowDown, ArrowUp, ChevronsUpDown, FilterX, ListFilter, Pencil, Plus, Search, Users } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronsUpDown, FilterX, ListFilter, Pencil, Plus, Search, StickyNote, Users } from "lucide-react";
 import { api, type Me, type SavedVolunteer, type Volunteer, type VolunteerFields } from "@/lib/api";
 import { br, cn, normalize, teamLabel } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -155,7 +155,7 @@ export function VoluntariosPage({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex flex-wrap items-center gap-2 border-b bg-background/85 px-5 py-2.5 backdrop-blur">
+      <header className="flex flex-wrap items-center gap-2 border-b bg-background/85 px-3 py-2.5 backdrop-blur md:px-5">
         <div className="mr-auto">
           <h1 className="text-[15px] leading-tight font-semibold">Voluntários</h1>
           <p className="text-xs text-muted-foreground">
@@ -168,44 +168,49 @@ export function VoluntariosPage({
         </Button>
       </header>
 
-      {/* filtros */}
-      <div className="flex flex-wrap items-center gap-2 border-b px-5 py-2.5">
-        <div className="relative">
+      {/* filtros — no celular: busca e "Filtros" em cima; equipe e os dois seletores numa faixa de arrastar */}
+      <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2.5 md:px-5">
+        <div className="relative max-md:min-w-0 max-md:flex-1">
           <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar nome ou observação" className="w-56 pl-8" />
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar nome ou observação" className="pl-8 md:w-56" />
         </div>
-        <Select value={team} onValueChange={setTeam}>
-          <SelectTrigger className="w-[190px]">
-            <Users className="size-4 text-muted-foreground" />
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todas as equipes</SelectItem>
-            {me.teams.map((t) => (
-              <SelectItem key={t} value={t}>
-                {teamLabel(t)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Segmented
-          value={gender}
-          onChange={setGender}
-          options={[
-            { value: "all", label: "Todos" },
-            { value: "Feminino", label: "Mulheres" },
-            { value: "Masculino", label: "Homens" },
-          ]}
-        />
-        <Segmented
-          value={status}
-          onChange={setStatus}
-          options={[
-            { value: "active", label: "Ativos" },
-            { value: "inactive", label: "Inativos" },
-            { value: "all", label: "Todos" },
-          ]}
-        />
+        {/* a partir de `md` este grupo some (`contents`) e os três voltam a ser itens da barra */}
+        <div className="flex items-center gap-2 max-md:order-1 max-md:basis-full max-md:overflow-x-auto max-md:[scrollbar-width:none] md:contents max-md:[&::-webkit-scrollbar]:hidden">
+          <Select value={team} onValueChange={setTeam}>
+            <SelectTrigger className="w-[190px] max-md:shrink-0">
+              <Users className="size-4 text-muted-foreground" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todas as equipes</SelectItem>
+              {me.teams.map((t) => (
+                <SelectItem key={t} value={t}>
+                  {teamLabel(t)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Segmented
+            className="max-md:shrink-0"
+            value={gender}
+            onChange={setGender}
+            options={[
+              { value: "all", label: "Todos" },
+              { value: "Feminino", label: "Mulheres" },
+              { value: "Masculino", label: "Homens" },
+            ]}
+          />
+          <Segmented
+            className="max-md:shrink-0"
+            value={status}
+            onChange={setStatus}
+            options={[
+              { value: "active", label: "Ativos" },
+              { value: "inactive", label: "Inativos" },
+              { value: "all", label: "Todos" },
+            ]}
+          />
+        </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="outline">
@@ -262,10 +267,40 @@ export function VoluntariosPage({
         ) : null}
       </div>
 
-      {/* tabela */}
-      <div className="min-h-0 flex-1 overflow-auto px-5 py-3">
-        <Card className="overflow-hidden">
-          <table className="w-full border-collapse text-[13px]">
+      {/* celular: lista compacta, e o resto do cadastro abre ao tocar · telas maiores: tabela completa */}
+      <div className="min-h-0 flex-1 overflow-auto px-3 py-3 md:px-5">
+        <Card className="overflow-hidden md:overflow-x-auto">
+          <ul className="divide-y md:hidden">
+            {rows.map((v) => (
+              <li key={v.id} className={cn("flex items-center gap-3 px-3", !v.active && "text-muted-foreground")}>
+                <button className="min-w-0 flex-1 py-2.5 text-left" onClick={() => setEdit(v)}>
+                  <span className="flex items-center gap-2 text-sm font-medium">
+                    <i className={cn("size-2 shrink-0 rounded-full", v.gender === "Feminino" ? "bg-rose-500" : "bg-sky-600")} />
+                    <span className="truncate">{v.name}</span>
+                    {v.observation && <StickyNote className="size-3 shrink-0 text-amber-600" aria-label="Tem observação" />}
+                  </span>
+                  <span className="mt-0.5 flex items-center gap-2 pl-4 text-xs text-muted-foreground">
+                    <span className="truncate">{teamLabel(v.team)}</span>
+                    {v.faltas > 0 && (
+                      <Badge variant="destructive" className="shrink-0">
+                        {v.faltas} falta{v.faltas > 1 ? "s" : ""}
+                      </Badge>
+                    )}
+                  </span>
+                </button>
+                {/* o rótulo em volta aumenta a área de toque da chave */}
+                <label className="-mr-2.5 flex cursor-pointer items-center p-2.5">
+                  <Switch
+                    checked={v.active}
+                    onCheckedChange={(c) => quickSave(v, { active: c })}
+                    aria-label={`${v.name}: ativo`}
+                  />
+                </label>
+              </li>
+            ))}
+            {!rows.length && <li className="py-12 text-center text-muted-foreground">Nenhum voluntário com esses filtros.</li>}
+          </ul>
+          <table className="w-full border-collapse text-[13px] max-md:hidden">
             <thead className="sticky top-0 z-10 bg-muted/80 text-left text-xs text-muted-foreground backdrop-blur">
               <tr className="h-9 [&>th]:font-medium">
                 {th("name", "Nome", "pl-4")}
@@ -391,7 +426,7 @@ function VolunteerSheet({
               <FieldLabel>Nome</FieldLabel>
               <Input autoFocus value={f.name ?? ""} onChange={(e) => set({ name: e.target.value })} required />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <FieldLabel>Gênero</FieldLabel>
                 <Segmented

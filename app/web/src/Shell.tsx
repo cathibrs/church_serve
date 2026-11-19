@@ -8,7 +8,7 @@ import { motion } from "motion/react";
 import { toast, Toaster } from "sonner";
 import type { Me } from "@/lib/api";
 import { href, load, parse, type Route, type Screen } from "@/lib/screens";
-import { AppSidebar } from "@/components/AppSidebar";
+import { AppSidebar, MobileNav } from "@/components/AppSidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { EscalaPage } from "@/pages/Escala";
 import { VoluntariosPage } from "@/pages/Voluntarios";
@@ -89,21 +89,23 @@ export default function Shell({ me, first, onSignOut }: { me: Me; first: Screen;
 
   const reload = useCallback(() => open(current.current, "replace"), [open]);
   const { screen, stamp } = shown;
+  const openPasswordChange = useCallback(() => setChangingPassword(true), []);
+  const menu = {
+    page: screen.page,
+    onOpen: open,
+    onSignOut,
+    onChangePassword: openPasswordChange,
+    userEmail: me.email,
+    isAdmin,
+  };
 
   return (
     <TooltipProvider delayDuration={250}>
-      <div className="flex h-full">
-        <AppSidebar
-          page={screen.page}
-          onOpen={open}
-          onSignOut={onSignOut}
-          onChangePassword={() => setChangingPassword(true)}
-          userEmail={me.email}
-          isAdmin={isAdmin}
-          collapsed={collapsed}
-          onToggle={toggleSidebar}
-        />
-        <main className="relative min-w-0 flex-1 overflow-hidden">
+      {/* Tela larga: barra lateral ao lado. Tela estreita: barra no topo, com o menu numa gaveta. */}
+      <div className="flex h-full flex-col lg:flex-row">
+        <MobileNav {...menu} />
+        <AppSidebar {...menu} collapsed={collapsed} onToggle={toggleSidebar} />
+        <main className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
           {loading && <div className="loading-bar no-print absolute inset-x-0 top-0 z-50 h-0.5 bg-primary" role="progressbar" />}
           {/* A tela nova entra na hora em que os dados chegam: sem animação de saída segurando a troca. */}
           <motion.div

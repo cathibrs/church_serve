@@ -374,72 +374,83 @@ export function EscalaPage({
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* ------------------------------------------------ barra superior */}
-      <header className="no-print sticky top-0 z-20 flex items-center gap-2 border-b bg-background/85 px-5 py-2.5 backdrop-blur">
-        <div className="mr-1 min-w-[132px]">
-          <h1 className="text-[15px] leading-tight font-semibold whitespace-nowrap">
+      {/* No celular são duas linhas: título e ações em cima, data e equipe embaixo. */}
+      <header className="no-print sticky top-0 z-20 flex flex-wrap items-center gap-2 border-b bg-background/85 px-3 py-2.5 backdrop-blur md:px-5">
+        <div className="min-w-0 max-md:flex-1 md:mr-1 md:min-w-[132px]">
+          <h1 className="truncate text-[15px] leading-tight font-semibold whitespace-nowrap">
             Escala · <span className="font-normal text-muted-foreground">{day?.weekday.replace("-Feira", "-feira") ?? ""}</span>
           </h1>
           <SaveIndicator state={save} />
         </div>
-        <Input
-          type="date"
-          value={date}
-          onChange={(e) => e.target.value && changeDate(e.target.value)}
-          className="w-[150px]"
-          aria-label="Data do culto"
-        />
-        <Select value={day.team} onValueChange={(team) => onOpen({ page: "escala", date: day.date, team })}>
-          <SelectTrigger className="w-[200px]">
-            <Users className="size-4 text-muted-foreground" />
-            <SelectValue placeholder="Equipe" />
-          </SelectTrigger>
-          <SelectContent>
-            {me.teams.map((t) => (
-              <SelectItem key={t} value={t}>
-                {teamLabel(t)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {day?.last_sunday && (
-          <Tooltip content="Quem estiver na recepção fica só na recepção (nem entrada, nem saída).">
-            <Badge variant="warning" className="h-9 rounded-md px-2.5 text-[13px]">
-              <AlertTriangle /> Último domingo
-            </Badge>
-          </Tooltip>
-        )}
+        {/* a partir de `md` este grupo some (`contents`) e os campos voltam a ser itens da barra */}
+        <div className="flex flex-wrap items-center gap-2 max-md:order-1 max-md:basis-full md:contents">
+          <Input
+            type="date"
+            value={date}
+            onChange={(e) => e.target.value && changeDate(e.target.value)}
+            className="max-md:min-w-[130px] max-md:flex-1 md:w-[150px]"
+            aria-label="Data do culto"
+          />
+          <Select value={day.team} onValueChange={(team) => onOpen({ page: "escala", date: day.date, team })}>
+            <SelectTrigger className="max-md:min-w-[130px] max-md:flex-1 md:w-[200px]">
+              <Users className="size-4 text-muted-foreground" />
+              <SelectValue placeholder="Equipe" />
+            </SelectTrigger>
+            <SelectContent>
+              {me.teams.map((t) => (
+                <SelectItem key={t} value={t}>
+                  {teamLabel(t)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {day?.last_sunday && (
+            <Tooltip tap content="Quem estiver na recepção fica só na recepção (nem entrada, nem saída).">
+              <Badge variant="warning" className="h-9 rounded-md px-2.5 text-[13px]">
+                <AlertTriangle /> Último domingo
+              </Badge>
+            </Tooltip>
+          )}
+        </div>
 
-        <div className="flex-1" />
-        <Tooltip content="Ativar ou desativar posições do culto">
-          <Button variant="outline" onClick={() => setSheet(true)}>
-            <Settings2 /> Posições <span className="text-muted-foreground tabular-nums">{active.size}</span>
-          </Button>
-        </Tooltip>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" disabled={!hasSchedule}>
-              <Download /> Exportar <ChevronDown className="size-3.5 opacity-60" />
+        <div className="flex-1 max-md:hidden" />
+        {/* as ações andam juntas: se a barra não couber numa linha, descem as três, alinhadas à direita */}
+        <div className="ml-auto flex items-center gap-2">
+          <Tooltip content="Ativar ou desativar posições do culto">
+            <Button variant="outline" className="max-sm:px-2.5" aria-label="Posições do culto" onClick={() => setSheet(true)}>
+              <Settings2 /> <span className="max-sm:hidden">Posições</span>{" "}
+              <span className="text-muted-foreground tabular-nums max-sm:hidden">{active.size}</span>
             </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={() => exportPng("map")}>
-              <Image /> Mapa em PNG
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => exportPng("ficha")}>
-              <Image /> Ficha posicional em PNG
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => setTimeout(() => window.print(), 50)}>
-              <Printer /> Imprimir
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <Button onClick={() => (hasSchedule ? setConfirmGen(true) : generate())} disabled={generating || !day}>
-          {generating ? <Loader2 className="animate-spin" /> : <Sparkles />}
-          Gerar escala
-        </Button>
+          </Tooltip>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="max-sm:px-2.5" aria-label="Exportar" disabled={!hasSchedule}>
+                <Download /> <span className="max-sm:hidden">Exportar</span>{" "}
+                <ChevronDown className="size-3.5 opacity-60 max-sm:hidden" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => exportPng("map")}>
+                <Image /> Mapa em PNG
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => exportPng("ficha")}>
+                <Image /> Ficha posicional em PNG
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setTimeout(() => window.print(), 50)}>
+                <Printer /> Imprimir
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button onClick={() => (hasSchedule ? setConfirmGen(true) : generate())} disabled={generating || !day}>
+            {generating ? <Loader2 className="animate-spin" /> : <Sparkles />}
+            <span>
+              Gerar<span className="max-sm:hidden"> escala</span>
+            </span>
+          </Button>
+        </div>
       </header>
 
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4">
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3 md:px-5 md:py-4">
         {/* ------------------------------------------------ presença */}
         <Card className="no-print">
           <CardHeader className={cn(!presenceOpen && "border-b-0")}>
@@ -454,14 +465,14 @@ export function EscalaPage({
               </span>
             </button>
             {presenceOpen && (
-              <div className="flex items-center gap-2">
-                <div className="relative">
+              <div className="flex items-center gap-2 max-md:w-full">
+                <div className="relative max-md:min-w-0 max-md:flex-1">
                   <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     value={presenceQ}
                     onChange={(e) => setPresenceQ(e.target.value)}
                     placeholder="Buscar nome"
-                    className="h-8 w-48 pl-8 text-[13px]"
+                    className="h-8 pl-8 text-[13px] md:w-48"
                   />
                 </div>
                 <Button
@@ -488,7 +499,8 @@ export function EscalaPage({
               >
                 <div className="px-4 pt-2 pb-3">
                   <p className="mb-2 text-xs text-muted-foreground">Clique no nome para marcar falta. Quem falta não entra na escala.</p>
-                  <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-1">
+                  {/* 140px no celular: cabem duas colunas numa tela de 360px */}
+                  <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-1 md:grid-cols-[repeat(auto-fill,minmax(150px,1fr))]">
                     {filteredVols.map((v) => {
                       const ok = present.has(v.id);
                       return (
@@ -498,7 +510,7 @@ export function EscalaPage({
                           title={`${v.faltas} falta(s) no histórico${v.observation ? `
 Obs.: ${v.observation}` : ""}`}
                           className={cn(
-                            "flex h-7 items-center gap-1.5 rounded-md border px-2 text-left text-[13px] transition-colors",
+                            "flex h-9 items-center gap-1.5 rounded-md border px-2 text-left text-[13px] transition-colors md:h-7",
                             ok
                               ? "border-input bg-background hover:bg-accent"
                               : "border-destructive/30 bg-destructive-soft text-destructive line-through",
@@ -527,10 +539,10 @@ Obs.: ${v.observation}` : ""}`}
                           <option key={m} value={m} />
                         ))}
                       </datalist>
-                      <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-x-3 gap-y-1">
+                      <div className="grid grid-cols-[repeat(auto-fill,minmax(min(300px,100%),1fr))] gap-x-3 gap-y-1">
                         {absentVols.map((v) => (
                           <label key={v.id} className="flex items-center gap-2 text-[13px]">
-                            <span className="w-32 shrink-0 truncate font-medium" title={v.name}>
+                            <span className="w-24 shrink-0 truncate font-medium md:w-32" title={v.name}>
                               {v.name}
                             </span>
                             <Input
@@ -539,7 +551,7 @@ Obs.: ${v.observation}` : ""}`}
                               onChange={(e) => setReason(v.id, e.target.value)}
                               placeholder="Ex.: doente, viagem, trabalho"
                               maxLength={200}
-                              className="h-7 bg-background text-[13px]"
+                              className="h-9 bg-background text-[13px] md:h-7"
                             />
                           </label>
                         ))}
@@ -557,7 +569,7 @@ Obs.: ${v.observation}` : ""}`}
           {outsideMap.length > 0 && (
             <div className="flex flex-wrap items-center gap-2 rounded-lg border border-sky-300 bg-sky-50 px-3.5 py-2 text-[13px] text-sky-950">
               <Users className="size-4 shrink-0" />
-              <span className="min-w-0 flex-1">
+              <span className="min-w-0 flex-1 basis-52">
                 <b>{outsideMap.length}</b> pessoa(s) fora do mapa: {outsideMap.map((v) => v.name).join(", ")}.
               </span>
               <Button size="sm" onClick={fitReception}>
@@ -598,26 +610,31 @@ Obs.: ${v.observation}` : ""}`}
 
         {/* ------------------------------------------------ mapa + ficha */}
         <div className="grid items-start gap-3 min-[1700px]:grid-cols-[minmax(0,1fr)_440px]">
-          <Card className="overflow-hidden">
+          {/* No celular a ficha vem antes (é legível de cara) e o mapa fica num tamanho fixo, de arrastar. */}
+          <Card className="overflow-hidden max-md:order-2">
             <CardHeader className="no-print">
-              <CardTitle>Mapa do templo</CardTitle>
-              <div className="flex items-center gap-3 text-xs text-muted-foreground">
+              <CardTitle>
+                Mapa do templo <span className="text-xs font-normal text-muted-foreground md:hidden">· arraste para os lados</span>
+              </CardTitle>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                 <Legend className="border border-dashed border-neutral-400 bg-white" label="vazio" />
                 <Legend className="bg-neutral-300" label="desativada · clique para ativar" />
                 <Legend className="bg-red-600" label="regra quebrada" />
               </div>
             </CardHeader>
-            <div
-              className="p-3 [&_svg]:h-auto [&_svg]:w-full"
-              onClick={(e) => {
-                const g = (e.target as Element).closest(".slot");
-                if (g) openSlot(g.getAttribute("data-code")!, g);
-              }}
-              dangerouslySetInnerHTML={{ __html: svg }}
-            />
+            <div className="overflow-x-auto">
+              <div
+                className="p-3 max-md:w-[1000px] [&_svg]:h-auto [&_svg]:w-full"
+                onClick={(e) => {
+                  const g = (e.target as Element).closest(".slot");
+                  if (g) openSlot(g.getAttribute("data-code")!, g);
+                }}
+                dangerouslySetInnerHTML={{ __html: svg }}
+              />
+            </div>
           </Card>
 
-          <Card className="print-break @container overflow-hidden">
+          <Card className="print-break @container overflow-hidden max-md:order-1">
             <CardHeader>
               <CardTitle>Ficha posicional</CardTitle>
               <span className="text-xs text-muted-foreground">clique para trocar</span>
@@ -664,8 +681,9 @@ Obs.: ${v.observation}` : ""}`}
                             )}
                             <div
                               className={cn(
-                                "grid grid-cols-3 gap-1 @5xl:grid-cols-4",
-                                sec.side === "rec" && "grid-cols-4 @3xl:grid-cols-5",
+                                // duas colunas enquanto a ficha é estreita (celular), para o nome caber
+                                "grid grid-cols-2 gap-1 @[420px]:grid-cols-3 @5xl:grid-cols-4",
+                                sec.side === "rec" && "@[420px]:grid-cols-4 @3xl:grid-cols-5",
                               )}
                             >
                               {list.map((c, i) => {
@@ -678,7 +696,7 @@ Obs.: ${v.observation}` : ""}`}
                                     data-code={c}
                                     onClick={(e) => openSlot(c, e.currentTarget)}
                                     className={cn(
-                                      "group flex h-8 min-w-0 items-center gap-1.5 rounded-md border px-2 text-left text-[13px] transition-[border-color,background-color]",
+                                      "group flex h-10 min-w-0 items-center gap-1.5 rounded-md border px-2 text-left text-[13px] transition-[border-color,background-color] md:h-8",
                                       !on && "border-dashed border-input bg-background text-muted-foreground/70 hover:text-foreground",
                                       on && !name && cn("border-dashed", t.empty),
                                       on && name && t.slot,

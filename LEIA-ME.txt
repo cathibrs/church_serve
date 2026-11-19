@@ -17,7 +17,7 @@ COMO ENTRAR
 COMO USAR
 1. Em "Escala", confira a data e a equipe. A equipe sugerida é a última usada naquele dia.
 2. Em "Presença", clique no nome de quem faltou. Embaixo aparece o campo "Motivo da falta"
-   (opcional); o motivo fica no histórico (passe o mouse no número de faltas).
+   (opcional); o motivo fica no histórico (passe o mouse no número de faltas; no celular, toque).
 3. Clique em "Gerar escala". A escala já é salva na hora.
 4. Para trocar alguém, clique no nome no mapa ou na ficha e escolha outra pessoa.
    - A lista mostra primeiro quem está livre.

@@ -53,6 +53,7 @@ export function PersonPicker({
   const blocked = items.filter((x) => x.c);
 
   const rect = target?.rect;
+  const touch = window.matchMedia("(pointer: coarse)").matches;
   return (
     <Popover open={!!target} onOpenChange={(o) => !o && onClose()}>
       <PopoverAnchor asChild>
@@ -67,11 +68,18 @@ export function PersonPicker({
           }}
         />
       </PopoverAnchor>
-      <PopoverContent className="w-80 p-0" align="start" collisionPadding={12}>
+      <PopoverContent
+        className="w-[min(20rem,calc(100vw-1.5rem))] p-0"
+        align="start"
+        collisionPadding={12}
+        // no toque, focar a busca abriria o teclado por cima da lista; quem quiser buscar toca no campo
+        onOpenAutoFocus={(e) => touch && e.preventDefault()}
+      >
         {p && (
           <Command
             filter={(value, search) => (normalize(value).includes(normalize(search)) ? 1 : 0)}
-            className="flex max-h-[min(460px,70vh)] flex-col"
+            // a altura respeita o espaço que sobra acima ou abaixo da posição, para não sair da tela
+            className="flex max-h-[min(460px,70dvh,var(--radix-popover-content-available-height))] flex-col"
           >
             <div className="border-b px-3 pt-2.5 pb-2">
               <div className="flex items-center justify-between gap-2">
@@ -98,7 +106,7 @@ export function PersonPicker({
             <div className="flex items-center gap-2 border-b px-3">
               <Search className="size-4 text-muted-foreground" />
               <Command.Input
-                autoFocus
+                autoFocus={!touch}
                 placeholder="Buscar pessoa…"
                 className="h-9 w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground/70"
               />
@@ -147,7 +155,7 @@ function Row({ x, onSelect }: { x: { v: Volunteer; c: string; w: string[] }; onS
     <Command.Item
       value={x.v.name}
       onSelect={onSelect}
-      className="flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none data-[selected=true]:bg-accent"
+      className="flex cursor-default items-center gap-2 rounded-md px-2 py-2.5 text-sm outline-none data-[selected=true]:bg-accent md:py-1.5"
     >
       <span
         className={`flex size-5 shrink-0 items-center justify-center rounded text-[11px] font-bold text-white ${x.v.gender === "Feminino" ? "bg-rose-500" : "bg-sky-600"}`}

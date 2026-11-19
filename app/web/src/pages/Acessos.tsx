@@ -56,7 +56,7 @@ function TeamPicker({ all, value, onChange }: { all: string[]; value: string[]; 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button type="button" variant="outline" className="w-[220px] justify-between font-normal" aria-label="Equipes">
+        <Button type="button" variant="outline" className="w-full justify-between font-normal sm:w-[220px]" aria-label="Equipes">
           <span className="flex min-w-0 items-center gap-2">
             <Users className="size-4 shrink-0 text-muted-foreground" />
             <span className={value.length ? "truncate" : "truncate text-muted-foreground"}>{label}</span>
@@ -128,7 +128,7 @@ export function AcessosPage({ me, users }: { me: Me; users: AccessUser[] }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex flex-wrap items-center gap-2 border-b bg-background/85 px-5 py-2.5 backdrop-blur">
+      <header className="flex flex-wrap items-center gap-2 border-b bg-background/85 px-3 py-2.5 backdrop-blur md:px-5">
         <div className="mr-auto">
           <h1 className="text-[15px] leading-tight font-semibold">Acessos</h1>
           <p className="text-xs text-muted-foreground">
@@ -137,7 +137,8 @@ export function AcessosPage({ me, users }: { me: Me; users: AccessUser[] }) {
         </div>
       </header>
 
-      <form onSubmit={submit} className="flex flex-wrap items-center gap-2 border-b px-5 py-2.5">
+      {/* no celular cada campo ocupa a largura toda */}
+      <form onSubmit={submit} className="flex flex-wrap items-center gap-2 border-b px-3 py-2.5 md:px-5">
         <Input
           type="email"
           required
@@ -146,7 +147,7 @@ export function AcessosPage({ me, users }: { me: Me; users: AccessUser[] }) {
           onChange={(e) => setDraft({ ...draft, email: e.target.value })}
           placeholder="E-mail a liberar"
           aria-label="E-mail a liberar"
-          className="w-64"
+          className="sm:w-64"
         />
         {!draft.editing && (
           <Input
@@ -155,11 +156,11 @@ export function AcessosPage({ me, users }: { me: Me; users: AccessUser[] }) {
             placeholder="Nome (opcional)"
             aria-label="Nome"
             maxLength={80}
-            className="w-48"
+            className="sm:w-48"
           />
         )}
         <Select value={draft.role} onValueChange={(v) => setDraft({ ...draft, role: v as Role })}>
-          <SelectTrigger className="w-[170px]" aria-label="Papel">
+          <SelectTrigger className="sm:w-[170px]" aria-label="Papel">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -170,7 +171,7 @@ export function AcessosPage({ me, users }: { me: Me; users: AccessUser[] }) {
         {draft.role === "coordinator" && (
           <TeamPicker all={me.teams} value={draft.teams} onChange={(teams) => setDraft({ ...draft, teams })} />
         )}
-        <Button type="submit" disabled={busy}>
+        <Button type="submit" disabled={busy} className="max-sm:flex-1">
           {busy ? <Loader2 className="animate-spin" /> : draft.editing ? <Pencil /> : <UserPlus />}
           {draft.editing ? "Salvar alteração" : "Liberar acesso"}
         </Button>
@@ -187,9 +188,10 @@ export function AcessosPage({ me, users }: { me: Me; users: AccessUser[] }) {
         </p>
       </form>
 
-      <div className="min-h-0 flex-1 overflow-auto px-5 py-3">
+      <div className="min-h-0 flex-1 overflow-auto px-3 py-3 md:px-5">
         <Card className="overflow-x-auto">
-          <table className="w-full border-collapse text-[13px]">
+          {/* no celular a tabela mantém uma largura legível e rola para o lado dentro do cartão */}
+          <table className="w-full border-collapse text-[13px] max-md:min-w-[820px]">
             <thead className="bg-muted/80 text-left text-xs text-muted-foreground">
               <tr className="h-9 [&>th]:font-medium">
                 <th className="pl-4">E-mail</th>
@@ -242,7 +244,7 @@ export function AcessosPage({ me, users }: { me: Me; users: AccessUser[] }) {
                     </td>
                     <td className="pr-3 text-right whitespace-nowrap">
                       {locked ? (
-                        <Tooltip content={why}>
+                        <Tooltip tap content={why}>
                           <span className="text-xs text-muted-foreground">fixo</span>
                         </Tooltip>
                       ) : (
@@ -366,10 +368,10 @@ function PasswordDialog({ password, onClose }: { password: NewPassword | null; o
         </>
       }
     >
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <code
           data-testid="senha-gerada"
-          className="flex-1 rounded-md border bg-muted px-3 py-2 text-center font-mono text-lg tracking-wider select-all"
+          className="min-w-0 flex-1 basis-48 rounded-md border bg-muted px-3 py-2 text-center font-mono text-lg tracking-wider break-all select-all"
         >
           {password?.value}
         </code>
