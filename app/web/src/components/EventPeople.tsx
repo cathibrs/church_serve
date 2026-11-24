@@ -68,7 +68,7 @@ export function EventPeople({
       <div className="space-y-3 border-b px-3 py-3 md:px-4">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <span className="text-sm">
-            <b className="text-base text-emerald-700 tabular-nums">{picked.length}</b>{" "}
+            <b className="text-base text-emerald-700 tabular-nums dark:text-emerald-400">{picked.length}</b>{" "}
             {picked.length === 1 ? "vai servir" : "vão servir"}
             {picked.length > 0 && (
               <span className="text-muted-foreground">
@@ -118,11 +118,11 @@ export function EventPeople({
                   className={cn(
                     "flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-sm transition-colors",
                     all
-                      ? "border-emerald-600 bg-emerald-50 text-emerald-900 hover:bg-emerald-100"
+                      ? "border-emerald-600 bg-emerald-50 text-emerald-900 hover:bg-emerald-100 dark:border-emerald-500 dark:bg-emerald-950/60 dark:text-emerald-100 dark:hover:bg-emerald-900/60"
                       : "border-input bg-background hover:bg-accent",
                   )}
                 >
-                  {all ? <Check className="size-3.5 text-emerald-700" strokeWidth={2.5} /> : <Plus className="size-3.5" />}
+                  {all ? <Check className="size-3.5 text-emerald-700 dark:text-emerald-400" strokeWidth={2.5} /> : <Plus className="size-3.5" />}
                   {teamLabel(team) || "Sem equipe"}
                   <span className="text-xs text-muted-foreground tabular-nums">{n && !all ? `${n} de ${ids.length}` : ids.length}</span>
                 </button>
@@ -176,7 +176,7 @@ function PeopleGrid({ people, chosen, onToggle }: { people: Volunteer[]; chosen?
           className={cn(
             "flex min-h-11 items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-sm leading-tight transition-colors",
             chosen
-              ? "border-emerald-300 bg-emerald-50 text-emerald-950 hover:border-destructive/40 hover:bg-destructive-soft"
+              ? "border-emerald-300 bg-emerald-50 text-emerald-950 hover:border-destructive/40 hover:bg-destructive-soft dark:border-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-50 dark:hover:border-destructive/40 dark:hover:bg-destructive-soft"
               : "border-input border-dashed bg-background text-muted-foreground hover:border-solid hover:bg-accent hover:text-foreground",
           )}
         >
@@ -188,7 +188,7 @@ function PeopleGrid({ people, chosen, onToggle }: { people: Volunteer[]; chosen?
             </span>
             <span className="block truncate pl-3.5 text-xs opacity-70">{teamLabel(v.team)}</span>
           </span>
-          {v.observation && <StickyNote className="size-3.5 shrink-0 text-amber-600" aria-label="Tem recado" />}
+          {v.observation && <StickyNote className="size-3.5 shrink-0 text-amber-600 dark:text-amber-400" aria-label="Tem recado" />}
         </button>
       ))}
     </div>

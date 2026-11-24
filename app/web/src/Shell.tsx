@@ -16,6 +16,7 @@ import { HistoricoPage } from "@/pages/Historico";
 import { AcessosPage } from "@/pages/Acessos";
 import { AtividadePage } from "@/pages/Atividade";
 import { ChangePassword } from "@/components/ChangePassword";
+import { useTheme } from "@/lib/theme";
 
 /** Como o endereço do navegador acompanha a troca de tela. */
 type Mode = "push" | "replace" | "pop";
@@ -26,6 +27,7 @@ export default function Shell({ me, first, onSignOut }: { me: Me; first: Screen;
   const [shown, setShown] = useState({ screen: first, stamp: 0 });
   const [loading, setLoading] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
+  const [theme, toggleTheme] = useTheme();
   const [collapsed, setCollapsed] = useState(() => {
     try {
       if (location.search.includes("menu=recolhido")) return true;
@@ -96,6 +98,8 @@ export default function Shell({ me, first, onSignOut }: { me: Me; first: Screen;
     onOpen: open,
     onSignOut,
     onChangePassword: openPasswordChange,
+    theme,
+    onToggleTheme: toggleTheme,
     userEmail: me.email,
     isAdmin,
   };
@@ -131,7 +135,7 @@ export default function Shell({ me, first, onSignOut }: { me: Me; first: Screen;
         </main>
       </div>
       <ChangePassword open={changingPassword} onOpenChange={setChangingPassword} />
-      <Toaster position="bottom-right" richColors closeButton toastOptions={{ className: "text-sm" }} />
+      <Toaster theme={theme} position="bottom-right" richColors closeButton toastOptions={{ className: "text-sm" }} />
     </TooltipProvider>
   );
 }

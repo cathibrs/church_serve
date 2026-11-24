@@ -123,7 +123,7 @@ export function HistoricoPage({
                   <div key={r.id} className="py-2">
                     <div className="flex items-baseline justify-between gap-2 text-sm">
                       <span className="truncate font-medium">{r.name}</span>
-                      <b className="shrink-0 text-red-600 tabular-nums">
+                      <b className="shrink-0 text-red-600 dark:text-red-400 tabular-nums">
                         {r.faltas} {r.faltas === 1 ? "falta" : "faltas"}
                       </b>
                     </div>
@@ -175,7 +175,7 @@ export function HistoricoPage({
                       </td>
                       <td className="truncate">{teamLabel(s.team)}</td>
                       <td className="text-center tabular-nums">{s.itens}</td>
-                      <td className={cn("text-center tabular-nums", s.faltas && "font-semibold text-red-600")}>{s.faltas}</td>
+                      <td className={cn("text-center tabular-nums", s.faltas && "font-semibold text-red-600 dark:text-red-400")}>{s.faltas}</td>
                       <td className="pr-2 text-right">
                         <ChevronRight className="inline size-4 opacity-50" />
                       </td>
@@ -200,7 +200,7 @@ export function HistoricoPage({
                       initial={{ height: 0 }}
                       animate={{ height: `${(s.faltas / maxSchedAbs) * 100}%` }}
                       transition={{ duration: 0.5, delay: i * 0.02 }}
-                      className="w-full max-w-7 rounded-t-sm bg-neutral-900"
+                      className="w-full max-w-7 rounded-t-sm bg-foreground"
                     />
                   </div>
                 </Tooltip>
@@ -281,7 +281,7 @@ export function HistoricoPage({
                     <td className="px-1 text-center">
                       {r.faltas ? (
                         <Tooltip tap side="right" content={<AbsenceList items={r.absences} total={r.faltas} />}>
-                          <b className="cursor-default text-red-600 tabular-nums">{r.faltas}</b>
+                          <b className="cursor-default text-red-600 dark:text-red-400 tabular-nums">{r.faltas}</b>
                         </Tooltip>
                       ) : (
                         <span className="text-muted-foreground/40">·</span>

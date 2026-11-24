@@ -93,7 +93,7 @@ export function PersonPicker({
                   <>
                     Agora: <b className="text-foreground">{vols[cur]?.name}</b>
                     {vols[cur]?.observation && (
-                      <span className="mt-0.5 flex items-start gap-1 text-amber-700">
+                      <span className="mt-0.5 flex items-start gap-1 text-amber-700 dark:text-amber-400">
                         <StickyNote className="mt-px size-3 shrink-0" /> {vols[cur]?.observation}
                       </span>
                     )}
@@ -167,12 +167,12 @@ function Row({ x, onSelect }: { x: { v: Volunteer; c: string; w: string[] }; onS
       <span className="min-w-0 flex-1">
         <span className="block truncate font-medium">{x.v.name}</span>
         {x.v.observation && (
-          <span className="mt-0.5 flex items-start gap-1 text-xs text-amber-700">
+          <span className="mt-0.5 flex items-start gap-1 text-xs text-amber-700 dark:text-amber-400">
             <StickyNote className="mt-0.5 size-3 shrink-0" /> {x.v.observation}
           </span>
         )}
         {x.c ? (
-          <span className="mt-0.5 flex items-start gap-1 text-xs text-amber-700">
+          <span className="mt-0.5 flex items-start gap-1 text-xs text-amber-700 dark:text-amber-400">
             <AlertTriangle className="mt-0.5 size-3 shrink-0" /> {x.c}
           </span>
         ) : x.w.length ? (

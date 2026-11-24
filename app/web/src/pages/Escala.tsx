@@ -462,7 +462,7 @@ export function EscalaPage({
               </div>
             </div>
             {day.last_sunday && (
-              <p className="flex items-start gap-2 rounded-md bg-warning-soft px-3 py-2 text-sm text-[oklch(0.42_0.1_70)]">
+              <p className="flex items-start gap-2 rounded-md bg-warning-soft px-3 py-2 text-sm text-warning-foreground">
                 <AlertTriangle className="mt-0.5 size-4 shrink-0" />
                 <span>
                   <b>Último domingo do mês:</b> quem estiver na recepção fica só na recepção (não faz entrada nem saída).
@@ -501,7 +501,7 @@ export function EscalaPage({
           <Card className="no-print">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b px-3 py-2.5 md:px-4">
               <span className="text-sm">
-                <b className="text-base text-emerald-700 tabular-nums">{presentCount}</b> vieram ·{" "}
+                <b className="text-base text-emerald-700 tabular-nums dark:text-emerald-400">{presentCount}</b> vieram ·{" "}
                 <b className={cn("text-base tabular-nums", absentCount ? "text-destructive" : "text-foreground")}>{absentCount}</b>{" "}
                 {absentCount === 1 ? "faltou" : "faltaram"}
               </span>
@@ -556,7 +556,7 @@ export function EscalaPage({
                       )}
                     >
                       {ok ? (
-                        <Check className="size-4 shrink-0 text-emerald-600" strokeWidth={2.5} />
+                        <Check className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" strokeWidth={2.5} />
                       ) : (
                         <X className="size-4 shrink-0" strokeWidth={2.5} />
                       )}
@@ -569,7 +569,7 @@ export function EscalaPage({
                         </span>
                         {!ok && <span className="block text-xs">faltou</span>}
                       </span>
-                      {v.observation && <StickyNote className="size-3.5 shrink-0 text-amber-600" aria-label="Tem recado" />}
+                      {v.observation && <StickyNote className="size-3.5 shrink-0 text-amber-600 dark:text-amber-400" aria-label="Tem recado" />}
                     </button>
                   );
                 })}
@@ -660,7 +660,7 @@ export function EscalaPage({
             <>
               <div className="no-print space-y-2">
                 {outsideMap.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-3 rounded-lg border border-sky-300 bg-sky-50 px-3.5 py-2.5 text-sm text-sky-950">
+                  <div className="flex flex-wrap items-center gap-3 rounded-lg border border-sky-300 bg-sky-50 px-3.5 py-2.5 text-sm text-sky-950 dark:border-sky-800 dark:bg-sky-950/50 dark:text-sky-100">
                     <Users className="size-4 shrink-0" />
                     <span className="min-w-0 flex-1 basis-52">
                       <b>
@@ -688,7 +688,7 @@ export function EscalaPage({
                   </div>
                 )}
                 {warnings.length > 0 && (
-                  <div className="rounded-lg border border-warning/40 bg-warning-soft px-3.5 py-2.5 text-sm text-[oklch(0.42_0.1_70)]">
+                  <div className="rounded-lg border border-warning/40 bg-warning-soft px-3.5 py-2.5 text-sm text-warning-foreground">
                     <div className="font-semibold">Observações sobre a escala</div>
                     <ul className="mt-1 ml-5 list-disc space-y-0.5">
                       {warnings.map((w, k) => (
@@ -791,7 +791,7 @@ export function EscalaPage({
                     </CardTitle>
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
                       <Legend className="border border-dashed border-neutral-400 bg-white" label="vaga vazia" />
-                      <Legend className="bg-neutral-300" label="desligada (toque para ligar)" />
+                      <Legend className="bg-neutral-300 dark:bg-neutral-600" label="desligada (toque para ligar)" />
                       <Legend className="bg-red-600" label="problema" />
                     </div>
                   </CardHeader>
@@ -907,29 +907,29 @@ const MOMENT = {
   in: {
     title: "Entrada · antes do culto",
     header: "bg-emerald-800",
-    label: "text-emerald-900",
+    label: "text-emerald-900 dark:text-emerald-300",
     labelBar: "border-emerald-600",
-    slot: "border-emerald-300 bg-emerald-50 text-emerald-950 hover:border-emerald-600 hover:bg-emerald-100",
-    empty: "border-emerald-300 bg-emerald-50/40 text-emerald-700/70 hover:border-emerald-500",
-    num: "text-emerald-700",
+    slot: "border-emerald-300 bg-emerald-50 text-emerald-950 hover:border-emerald-600 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-50 dark:hover:border-emerald-500 dark:hover:bg-emerald-900/60",
+    empty: "border-emerald-300 bg-emerald-50/40 text-emerald-700/70 hover:border-emerald-500 dark:border-emerald-800 dark:bg-emerald-950/20 dark:text-emerald-300/70",
+    num: "text-emerald-700 dark:text-emerald-400",
   },
   out: {
     title: "Saída · depois do culto",
     header: "bg-orange-800",
-    label: "text-orange-900",
+    label: "text-orange-900 dark:text-orange-300",
     labelBar: "border-orange-500",
-    slot: "border-orange-300 bg-orange-50 text-orange-950 hover:border-orange-600 hover:bg-orange-100",
-    empty: "border-orange-300 bg-orange-50/40 text-orange-700/70 hover:border-orange-500",
-    num: "text-orange-700",
+    slot: "border-orange-300 bg-orange-50 text-orange-950 hover:border-orange-600 hover:bg-orange-100 dark:border-orange-800 dark:bg-orange-950/60 dark:text-orange-50 dark:hover:border-orange-500 dark:hover:bg-orange-900/60",
+    empty: "border-orange-300 bg-orange-50/40 text-orange-700/70 hover:border-orange-500 dark:border-orange-800 dark:bg-orange-950/20 dark:text-orange-300/70",
+    num: "text-orange-700 dark:text-orange-400",
   },
   rec: {
     title: "Recepção",
     header: "bg-sky-800",
-    label: "text-sky-900",
+    label: "text-sky-900 dark:text-sky-300",
     labelBar: "border-sky-600",
-    slot: "border-sky-300 bg-sky-50 text-sky-950 hover:border-sky-600 hover:bg-sky-100",
-    empty: "border-sky-300 bg-sky-50/40 text-sky-700/70 hover:border-sky-500",
-    num: "text-sky-700",
+    slot: "border-sky-300 bg-sky-50 text-sky-950 hover:border-sky-600 hover:bg-sky-100 dark:border-sky-800 dark:bg-sky-950/60 dark:text-sky-50 dark:hover:border-sky-500 dark:hover:bg-sky-900/60",
+    empty: "border-sky-300 bg-sky-50/40 text-sky-700/70 hover:border-sky-500 dark:border-sky-800 dark:bg-sky-950/20 dark:text-sky-300/70",
+    num: "text-sky-700 dark:text-sky-400",
   },
 } as const;
 
@@ -945,11 +945,11 @@ function toAssignments(assign: Record<string, number>, vols: Record<number, Volu
 function VolunteerNotes({ people, className }: { people: Volunteer[]; className?: string }) {
   if (!people.length) return null;
   return (
-    <div className={cn("rounded-lg border border-amber-200 bg-amber-50/70 p-3", className)}>
-      <div className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold text-amber-900">
+    <div className={cn("rounded-lg border border-amber-200 bg-amber-50/70 p-3 dark:border-amber-900/60 dark:bg-amber-950/40", className)}>
+      <div className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold text-amber-900 dark:text-amber-200">
         <StickyNote className="size-4" /> Recados dos voluntários
       </div>
-      <ul className="space-y-1 text-sm text-amber-950">
+      <ul className="space-y-1 text-sm text-amber-950 dark:text-amber-100">
         {people.map((v) => (
           <li key={v.id}>
             <b className="font-medium">{v.name}:</b> {v.observation}
@@ -986,7 +986,7 @@ function SaveIndicator({ state }: { state: SaveState }) {
       </span>
     );
   return (
-    <span className={cn(base, "text-emerald-700")}>
+    <span className={cn(base, "text-emerald-700 dark:text-emerald-400")}>
       <Check className="size-3 shrink-0" /> Tudo salvo às {state.at}
     </span>
   );

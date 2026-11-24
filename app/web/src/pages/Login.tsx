@@ -181,7 +181,7 @@ export function LoginPage({
             </p>
           </div>
 
-          {note && <p className="rounded-md bg-success-soft px-3 py-2 text-sm text-emerald-800">{note}</p>}
+          {note && <p className="rounded-md bg-success-soft px-3 py-2 text-sm text-success-foreground">{note}</p>}
 
           {(step === "entrar" || step === "esqueci") && emailField}
           {(step === "codigo" || step === "nova-senha") && codeField}

@@ -326,7 +326,7 @@ export function VoluntariosPage({
                   <span className="flex items-center gap-2 text-sm font-medium">
                     <i className={cn("size-2 shrink-0 rounded-full", v.gender === "Feminino" ? "bg-rose-500" : "bg-sky-600")} />
                     <span className="truncate">{v.name}</span>
-                    {v.observation && <StickyNote className="size-3 shrink-0 text-amber-600" aria-label="Tem recado" />}
+                    {v.observation && <StickyNote className="size-3 shrink-0 text-amber-600 dark:text-amber-400" aria-label="Tem recado" />}
                     {!!v.notas && (
                       <span className="flex shrink-0 items-center gap-0.5 text-xs font-normal text-muted-foreground">
                         <MessageSquareText className="size-3" aria-label="Observações" /> {v.notas}
@@ -408,7 +408,7 @@ export function VoluntariosPage({
                       >
                         {v.observation && (
                           <span className="line-clamp-2">
-                            <StickyNote className="mr-1 inline size-3 align-[-1px] text-amber-600" />
+                            <StickyNote className="mr-1 inline size-3 align-[-1px] text-amber-600 dark:text-amber-400" />
                             {v.observation}
                           </span>
                         )}

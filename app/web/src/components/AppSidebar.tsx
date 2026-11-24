@@ -8,13 +8,16 @@ import {
   Lock,
   LogOut,
   Menu,
+  Moon,
   PanelLeftClose,
   PanelLeftOpen,
   ScrollText,
+  Sun,
   Users,
   X,
 } from "lucide-react";
 import { href, prefetch, type Page, type Route } from "@/lib/screens";
+import type { Theme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { Tooltip } from "./ui/tooltip";
 
@@ -36,6 +39,8 @@ interface MenuProps {
   onOpen: (route: Route) => void;
   onSignOut: () => void;
   onChangePassword: () => void;
+  theme: Theme;
+  onToggleTheme: () => void;
   userEmail: string;
   isAdmin: boolean;
 }
@@ -138,6 +143,8 @@ function SidebarBody({
   onOpen,
   onSignOut,
   onChangePassword,
+  theme,
+  onToggleTheme,
   userEmail,
   isAdmin,
   collapsed,
@@ -252,6 +259,12 @@ function SidebarBody({
             onClick={onToggle}
           />
         )}
+        <SideAction
+          collapsed={collapsed}
+          icon={theme === "dark" ? Sun : Moon}
+          label={theme === "dark" ? "Tema claro" : "Tema escuro"}
+          onClick={onToggleTheme}
+        />
         <SideAction collapsed={collapsed} icon={Lock} label="Alterar senha" onClick={onChangePassword} />
         <SideAction collapsed={collapsed} icon={LogOut} label="Sair" onClick={onSignOut} />
         {!collapsed && (
