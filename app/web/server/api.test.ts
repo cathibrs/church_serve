@@ -345,6 +345,11 @@ describe("escala", () => {
     present = data.volunteers.map((v: any) => v.id).slice(0, 34);
   });
 
+  it("regra do último domingo só vale para equipe de domingo (quarta não entrega envelopes)", async () => {
+    expect((await get(sheet("2026-11-29", TEAM))).data.last_sunday).toBe(true);
+    expect((await get(sheet("2026-11-29", "Quarta-Feira_Noite_A"))).data.last_sunday).toBe(false);
+  });
+
   it("gera, salva e lê de volta", async () => {
     const gen = await suggest(DATE, { present_ids: present });
     expect(gen.status).toBe(200);

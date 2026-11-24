@@ -32,6 +32,14 @@ export function isLastSunday(iso: string): boolean {
   return next.getUTCMonth() !== d.getUTCMonth();
 }
 
+/**
+ * Regra do último domingo (recepção entrega os envelopes e não faz saída). Vale pela data e
+ * pela equipe: a equipe de quarta não entrega envelopes, mesmo escalada num domingo.
+ */
+export function envelopeSunday(iso: string, team: string): boolean {
+  return isLastSunday(iso) && !team.startsWith("Quarta");
+}
+
 export function teamForDate(iso: string): string {
   return utcDate(iso).getUTCDay() === 3 ? "Quarta-Feira_Noite_A" : "Domingo_Manha_A";
 }

@@ -37,7 +37,7 @@ import {
   EVENT_TEAM,
   FACTORY_ACTIVE,
   isEventTeam,
-  isLastSunday,
+  envelopeSunday,
   isoDate,
   localNow,
   MAP_CATEGORIES,
@@ -257,12 +257,12 @@ async function defaultActive(sql: Sql, team: string): Promise<string[]> {
  * Regras quebradas na escala. `roster`: todos da equipe (ativos e inativos), já carregados.
  * No evento quem não foi escolhido não faltou: só não foi chamado.
  */
-function issuesOf(roster: Volunteer[], assignments: Assignment[], date: string, present: Set<number>, event = false): Issue[] {
+function issuesOf(roster: Volunteer[], assignments: Assignment[], lastSunday: boolean, present: Set<number>, event = false): Issue[] {
   const vols = new Map(roster.map((v) => [v.id, v]));
   const absent =
     present.size && !event ? new Set([...vols.keys()].filter((id) => !present.has(id))) : new Set<number>();
   const mustPlace = new Set([...present].filter((id) => vols.get(id)?.active));
-  return validate(assignments, vols, POSITION_BY_CODE, isLastSunday(date), absent, mustPlace);
+  return validate(assignments, vols, POSITION_BY_CODE, lastSunday, absent, mustPlace);
 }
 
 // ====================================================================== sessão
@@ -458,12 +458,12 @@ async function getSheet({ sql, user, params }: Ctx) {
     const present = event
       ? new Set(schedule.present)
       : new Set(volunteers.filter((v) => v.active && !schedule.absent.has(v.id)).map((v) => v.id));
-    issues = issuesOf(volunteers, current, date, present, event);
+    issues = issuesOf(volunteers, current, envelopeSunday(date, team), present, event);
   }
   return {
     date,
     weekday: weekdayName(date),
-    last_sunday: isLastSunday(date),
+    last_sunday: envelopeSunday(date, team),
     team,
     volunteers,
     default_active: active,
@@ -508,7 +508,7 @@ async function putSchedule({ sql, user, params, body }: Ctx) {
     activeCodes: codeList(body.active_codes),
     absentReasons: reasons,
   });
-  return { id, saved_at: localNow().time, issues: issuesOf(roster, assignments, date, present, event) };
+  return { id, saved_at: localNow().time, issues: issuesOf(roster, assignments, envelopeSunday(date, team), present, event) };
 }
 
 /** Sugestão de escala para os presentes. Não grava nada: o site grava com PUT quando aceita. */
@@ -539,7 +539,7 @@ async function suggestSchedule({ sql, user, params, body }: Ctx) {
       last_positions: lastPositions,
       last_altar_gender: lastAltarGender,
     },
-    isLastSunday(date),
+    envelopeSunday(date, team),
     all.filter((p) => p.category === RECEPTION_CATEGORY),
   );
   if ([...present].some((id) => !ids.includes(id))) {
@@ -548,7 +548,7 @@ async function suggestSchedule({ sql, user, params, body }: Ctx) {
   return {
     assignments: result.assignments,
     warnings: result.warnings,
-    issues: issuesOf(roster, result.assignments, date, present, event),
+    issues: issuesOf(roster, result.assignments, envelopeSunday(date, team), present, event),
   };
 }
 
