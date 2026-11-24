@@ -16,22 +16,6 @@ CREATE TABLE IF NOT EXISTS volunteers (
     can_limpar_altar BOOLEAN NOT NULL DEFAULT TRUE
 );
 
--- Contagens trazidas da planilha na carga inicial (somam com as escalas salvas).
-CREATE TABLE IF NOT EXISTS history_seed (
-    volunteer_id INTEGER NOT NULL REFERENCES volunteers(id) ON DELETE CASCADE,
-    category     TEXT    NOT NULL,
-    count        INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (volunteer_id, category)
-);
-
-CREATE TABLE IF NOT EXISTS history_position_seed (
-    volunteer_id  INTEGER NOT NULL REFERENCES volunteers(id) ON DELETE CASCADE,
-    position_code TEXT    NOT NULL,
-    category      TEXT    NOT NULL,
-    count         INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (volunteer_id, position_code)
-);
-
 -- service_date é texto AAAA-MM-DD (ordenação simples, sem fuso horário).
 -- Não há índice único em (service_date, team): o banco antigo tem escalas repetidas
 -- que contam no histórico; ao salvar, o sistema substitui a escala da mesma data e equipe.

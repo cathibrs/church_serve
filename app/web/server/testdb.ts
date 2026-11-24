@@ -4,8 +4,7 @@
  */
 import { readFileSync } from "node:fs";
 import { PGlite } from "@electric-sql/pglite";
-import type { Query, Sql } from "./db.ts";
-import { applySchema } from "./importer.ts";
+import { applySchema, type Query, type Sql } from "./db.ts";
 
 type Row = Record<string, any>;
 

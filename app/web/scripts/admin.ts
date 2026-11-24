@@ -10,8 +10,7 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { generatePassword, neonAccounts } from "../server/accounts.ts";
-import { cleanEmail, countAdmins, getAccountName, upsertAppUser, type Sql } from "../server/db.ts";
-import { applySchema } from "../server/importer.ts";
+import { applySchema, cleanEmail, countAdmins, getAccountName, upsertAppUser, type Sql } from "../server/db.ts";
 
 async function main() {
   const email = cleanEmail(process.argv[2]);

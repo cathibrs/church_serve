@@ -1,7 +1,7 @@
 /**
  * Atualização automática do banco.
  *
- * O banco é criado por db/schema.sql (npm run admin / npm run import). Quando uma versão nova
+ * O banco é criado por db/schema.sql (npm run admin). Quando uma versão nova
  * do sistema precisa de tabelas ou colunas novas, a API se ajusta sozinha: na primeira vez
  * que o login de um pedido esbarra numa coluna que falta, ela roda os comandos abaixo e
  * tenta de novo. Assim publicar o site basta, sem rodar nada à mão no banco.

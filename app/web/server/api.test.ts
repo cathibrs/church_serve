@@ -1,9 +1,8 @@
-/** API REST de ponta a ponta sobre um Postgres embutido: login, escala, voluntários e importação. */
+/** API REST de ponta a ponta sobre um Postgres embutido: login, escala, e voluntários. */
 import { beforeAll, describe, expect, it } from "vitest";
 import { FACTORY_ACTIVE, POSITIONS } from "../shared/catalog.ts";
 import type { Accounts } from "./accounts.ts";
 import { setMeta, type Sql } from "./db.ts";
-import { applyImport, buildImport, parseBaseSheet, type SourceData } from "./importer.ts";
 import { handle, type HandleOptions } from "./routes.ts";
 import { createTestDb } from "./testdb.ts";
 
@@ -403,15 +402,6 @@ describe("escala", () => {
     const columns = Object.entries(served.counts as Record<string, number>);
     expect(columns.length).toBeGreaterThan(0);
     expect(columns.every(([column, n]) => n === 1 && /^(POS_|Cozinha|Confete|Banheiro|Limpeza|Recepção)/.test(column))).toBe(true);
-    // a carga inicial da planilha soma com as escalas salvas
-    await sql`INSERT INTO history_seed (volunteer_id, category, count) VALUES (${present[0]}, 'Cozinha', 3)`;
-    await sql`INSERT INTO history_position_seed (volunteer_id, position_code, category, count)
-              VALUES (${present[0]}, '07', 'Corredor', 5)`;
-    const after = (await get(`/api/history?team=${TEAM}`)).data.find((r: any) => r.id === present[0]);
-    expect(after.counts.Cozinha).toBe((served.counts.Cozinha ?? 0) + 3);
-    expect(after.counts.POS_07).toBe((served.counts.POS_07 ?? 0) + 5);
-    await sql`DELETE FROM history_seed`;
-    await sql`DELETE FROM history_position_seed`;
   });
 
   it("no culto seguinte ninguém repete a posição do mapa e a equipe sugerida é a última usada", async () => {
@@ -496,72 +486,5 @@ describe("voluntários", () => {
   it("voluntário que não existe: 404", async () => {
     expect((await call("PATCH", "/api/volunteers/999999", { active: false })).status).toBe(404);
     expect((await call("PATCH", "/api/volunteers/abc", { active: false })).status).toBe(404);
-  });
-});
-
-describe("carga inicial", () => {
-  const source: SourceData = {
-    volunteers: [
-      { id: 7, name: "Ana", gender: "Feminino", team: "Domingo_Manha_A", active: 1, observation: "obs", can_bercario: 1, can_cozinha: 0, can_recepcao: 1, can_banheiro: 1, can_limpar_altar: 1 },
-      { id: 9, name: "Beto", gender: "Masculino", team: "Domingo_Manha_A", active: 0, observation: null, can_bercario: 0, can_cozinha: 1, can_recepcao: 1, can_banheiro: 1, can_limpar_altar: 1 },
-    ],
-    history_seed: [],
-    history_position_seed: [],
-    schedules: [{ id: 3, service_date: "2026-11-15", service_type: "Domingo", team: "Domingo_Manha_A", notes: "", status: "finalizada", active_codes: '["01","02"]', created_at: "2026-11-15 12:00:00" }],
-    schedule_items: [
-      { id: 1, schedule_id: 3, position_code: "01", position_name: "Corredor 01", category: "Corredor", volunteer_id: 7, volunteer_name: "Ana", item_order: 1 },
-      { id: 2, schedule_id: 3, position_code: "02", position_name: "Corredor 02", category: "Corredor", volunteer_id: 99, volunteer_name: "Apagado", item_order: 2 },
-    ],
-    presence: [
-      { id: 1, schedule_id: 3, volunteer_id: 7, confirmed: 1, absent: 0, justification: null },
-      { id: 2, schedule_id: 3, volunteer_id: 9, confirmed: 0, absent: 1, justification: "doente" },
-    ],
-    app_meta: [
-      { key: "faltas_planilha", value: '{"Ana": ""}' },
-      { key: "posicoes_padrao", value: '["01","02"]' },
-    ],
-  };
-  const sheet = parseBaseSheet([
-    ["Equipe", "Voluntarios", "Genero", "Falta", "Total_Faltas", "Cozinha", "POS_BM", "POS_3"],
-    ["Domingo_Noite_A", "Ana", "feminino", "Sim", 2, 1, null, 4],
-    ["domingo noite a", " Caio  Lima ", "Masc", null, 0, 3, 2, 5],
-    [null, "Falta", null, null, null, null, null, null],
-    ["Domingo_Manha_A", "Sem Genero", null, null, null, null, null, null],
-  ]);
-
-  it("lê a aba BASE_TAREFAS", () => {
-    expect(sheet).toEqual([
-      { name: "Ana", gender: "Feminino", team: "Domingo_Noite_A", category_counts: { Cozinha: 1, Corredor: 4 }, position_counts: { "03": ["Corredor", 4] } },
-      { name: "Caio Lima", gender: "Masculino", team: "Domingo_Noite_A", category_counts: { Cozinha: 3, Banheiro: 2, Corredor: 5 }, position_counts: { BM: ["Banheiro", 2], "03": ["Corredor", 5] } },
-    ]);
-  });
-
-  it("SQLite + planilha: preserva ids, atualiza equipe, cria quem falta e não conta histórico em dobro", async () => {
-    const db = (await createTestDb()).sql;
-    const plan = buildImport(source, sheet);
-    const counts = await applyImport(db, plan);
-    expect(counts).toEqual({ volunteers: 3, history_seed: 0, history_position_seed: 0, schedules: 1, schedule_items: 1, presence: 2, app_meta: 1 });
-    expect(plan.notes.join(" ")).toContain("1 registro(s)");
-
-    const vols = await db`SELECT id, name, team, active, can_cozinha FROM volunteers ORDER BY id`;
-    expect(vols).toEqual([
-      { id: 7, name: "Ana", team: "Domingo_Noite_A", active: true, can_cozinha: false },
-      { id: 9, name: "Beto", team: "Domingo_Manha_A", active: false, can_cozinha: true },
-      { id: 10, name: "Caio Lima", team: "Domingo_Noite_A", active: true, can_cozinha: true },
-    ]);
-    // o próximo voluntário criado pelo sistema continua a numeração
-    const [created] = await db`INSERT INTO volunteers (name, gender) VALUES ('Novo', 'Masculino') RETURNING id`;
-    expect(created.id).toBe(11);
-    const [meta] = await db`SELECT key, value FROM app_meta`;
-    expect(meta).toEqual({ key: "posicoes_padrao", value: ["01", "02"] });
-
-    await expect(applyImport(db, plan)).rejects.toThrow("--force");
-    await expect(applyImport(db, plan, { force: true })).resolves.toMatchObject({ volunteers: 3 });
-  });
-
-  it("só a planilha: as contagens viram histórico", async () => {
-    const db = (await createTestDb()).sql;
-    const counts = await applyImport(db, buildImport(null, sheet));
-    expect(counts).toMatchObject({ volunteers: 2, history_seed: 5, history_position_seed: 3, schedules: 0 });
   });
 });

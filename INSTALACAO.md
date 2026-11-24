@@ -12,7 +12,7 @@ Para trocar alguém, clique no nome. Tudo é salvo sozinho. Mais detalhes em `LE
 
 ## Para publicar o site
 
-O passo a passo (Neon, carga inicial dos dados e Netlify) está em [`app/web/README.md`](app/web/README.md).
+O passo a passo (Neon, primeiro administrador e Netlify) está em [`app/web/README.md`](app/web/README.md).
 
 ---
 

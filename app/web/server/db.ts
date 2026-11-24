@@ -112,6 +112,16 @@ export async function setMeta(sql: Sql, key: string, value: unknown): Promise<vo
     ON CONFLICT (key) DO UPDATE SET value = excluded.value`;
 }
 
+/** Cria as tabelas que faltam (db/schema.sql, um comando por vez). */
+export async function applySchema(sql: Sql, schemaText: string): Promise<void> {
+  const statements = schemaText
+    .replace(/^\s*--.*$/gm, "")
+    .split(";")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  for (const statement of statements) await sql.query(statement);
+}
+
 // ---------------------------------------------------------------- posições (fixas, vêm do código)
 
 export function getPositions(): Position[] {
@@ -279,20 +289,10 @@ export async function getHistoryStats(sql: Sql, volunteerIds: number[]): Promise
     volunteerIds.map((id) => [id, { counts: {}, position_counts: {}, total: 0 }]),
   );
   if (!volunteerIds.length) return stats;
-  const [seeds, positionSeeds, items] = await Promise.all([
-    sql`SELECT volunteer_id, category, count FROM history_seed WHERE volunteer_id = ANY(${volunteerIds}::int[])`,
-    sql`SELECT volunteer_id, position_code, count FROM history_position_seed
-        WHERE volunteer_id = ANY(${volunteerIds}::int[])`,
-    sql`SELECT volunteer_id, category, position_code, COUNT(*)::int AS n FROM schedule_items
-        WHERE volunteer_id = ANY(${volunteerIds}::int[]) GROUP BY volunteer_id, category, position_code`,
-  ]);
+  const items = await sql`
+    SELECT volunteer_id, category, position_code, COUNT(*)::int AS n FROM schedule_items
+    WHERE volunteer_id = ANY(${volunteerIds}::int[]) GROUP BY volunteer_id, category, position_code`;
   const add = (target: Record<string, number>, key: string, n: number) => (target[key] = (target[key] ?? 0) + n);
-  for (const r of seeds) {
-    const item = stats.get(r.volunteer_id)!;
-    add(item.counts, r.category, r.count);
-    item.total += r.count;
-  }
-  for (const r of positionSeeds) add(stats.get(r.volunteer_id)!.position_counts, r.position_code, r.count);
   for (const r of items) {
     const item = stats.get(r.volunteer_id)!;
     add(item.counts, r.category, r.n);
@@ -537,20 +537,15 @@ function historyColumn(category: string, rawCode: string | null): string | null 
 
 /**
  * Histórico dos voluntários ativos: quantas vezes cada um serviu em cada função e as
- * faltas. O banco soma a carga inicial da planilha com as escalas salvas.
+ * faltas, contados nas escalas salvas.
  */
 export async function getHistory(sql: Sql, teams: Teams = null): Promise<HistoryRow[]> {
   const scope = volunteerScope(true, teams);
   const [vols, counts, absences] = await Promise.all([
     sql.query(`SELECT v.id, v.name, v.gender, v.team FROM volunteers v WHERE ${VOLUNTEER_SCOPE}`, scope),
     sql.query(
-      `SELECT t.volunteer_id, t.category, t.position_code, SUM(t.n)::int AS n FROM (
-         SELECT volunteer_id, category, NULL::text AS position_code, count AS n FROM history_seed
-         UNION ALL
-         SELECT volunteer_id, 'Corredor', position_code, count FROM history_position_seed
-         UNION ALL
-         SELECT volunteer_id, category, position_code, 1 FROM schedule_items
-       ) t JOIN volunteers v ON v.id = t.volunteer_id
+      `SELECT t.volunteer_id, t.category, t.position_code, COUNT(*)::int AS n FROM schedule_items t
+       JOIN volunteers v ON v.id = t.volunteer_id
        WHERE ${VOLUNTEER_SCOPE}
        GROUP BY t.volunteer_id, t.category, t.position_code`,
       scope,

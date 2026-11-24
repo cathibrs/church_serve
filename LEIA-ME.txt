@@ -84,11 +84,11 @@ O QUE MUDOU
 
 ARQUIVOS ANTIGOS NESTA PASTA (cópia de segurança; o site não usa)
 - EscalaIgreja.exe e EscalaIgreja_antigo.exe     programa de Windows anterior
-- POSICIONAMENTO E TAREFAS.xlsx                   planilha usada na carga inicial
+- POSICIONAMENTO E TAREFAS.xlsx                   planilha antiga (não é mais usada)
 - data\igreja_escala.db                           banco do programa anterior
 - exports\                                        planilhas geradas pelo programa anterior
-Guarde esses arquivos até confirmar que o histórico no site está completo.
+O site não lê nenhum deles.
 
 CÓDIGO-FONTE E PUBLICAÇÃO: veja app\web\README.md
-  app\web          site (React), API (Netlify Functions), banco (Neon) e carga inicial
+  app\web          site (React), API (Netlify Functions), banco (Neon)
   app\escala       programa antigo em Python (só referência)

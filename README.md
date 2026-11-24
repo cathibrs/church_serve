@@ -27,7 +27,6 @@ As regras completas da escala estão em [`LEIA-ME.txt`](LEIA-ME.txt).
 | Regras da escala, banco e rotas | TypeScript | [`app/web/server`](app/web/server) |
 | Banco de dados | Postgres (Neon) | [`app/web/db/schema.sql`](app/web/db/schema.sql) |
 | Login | Neon Auth | [`app/web/server/auth.ts`](app/web/server/auth.ts) |
-| Carga inicial dos dados | script Node | [`app/web/scripts/import.ts`](app/web/scripts/import.ts) |
 
 Só acessa a escala quem foi liberado por um administrador (tela Acessos), como administrador ou
 como coordenador de uma ou mais equipes. O coordenador só vê e altera o que é das equipes dele.

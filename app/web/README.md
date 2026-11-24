@@ -1,8 +1,7 @@
 # Escala de Voluntários (versão web)
 
 Site em React publicado no Netlify. A API (`/api/*`) roda em Netlify Functions, os dados ficam em
-Postgres no Neon e o acesso é por login individual (Neon Auth). A planilha
-`POSICIONAMENTO E TAREFAS.xlsx` só é usada uma vez, na carga inicial.
+Postgres no Neon e o acesso é por login individual (Neon Auth).
 
 ```
 netlify.toml (na raiz)     configuração da publicação
@@ -12,7 +11,7 @@ app/web/
   server/                  regras da escala, banco, login e rotas
   shared/catalog.ts        posições, equipes e regras fixas (usado pelo site e pela API)
   db/schema.sql            tabelas do Postgres
-  scripts/import.ts        carga inicial (SQLite antigo + planilha)
+  scripts/admin.ts         cria o primeiro administrador
 ```
 
 ## Publicar pela primeira vez
@@ -39,30 +38,14 @@ neon deploy            # cria o que neon.ts declara e grava as variáveis em .en
 - O site exige e-mail confirmado por código mesmo que a opção *Verify email at signup* do Neon
   esteja desligada (é o padrão): quem entra sem confirmar cai na tela do código.
 
-### 2. Carga inicial dos dados
+### 2. Dependências
 
 ```bash
 npm install
-
-# ensaio: confere os arquivos em um banco temporário, sem tocar no Neon
-npm run import -- --db ../../data/igreja_escala.db --xlsx "../../POSICIONAMENTO E TAREFAS.xlsx" --dry-run
-
-# carga de verdade
-npm run import -- --db ../../data/igreja_escala.db --xlsx "../../POSICIONAMENTO E TAREFAS.xlsx"
 ```
 
-Da raiz do projeto o mesmo comando funciona, com os caminhos a partir dela:
-`npm run import -- --db data/igreja_escala.db --xlsx "POSICIONAMENTO E TAREFAS.xlsx"`.
-
-O comando mostra quantas linhas leu e quantas gravou em cada tabela. O que ele faz:
-
-- copia do banco antigo os voluntários (com inativos, permissões e observações), as escalas, os
-  itens e as presenças/faltas, mantendo os mesmos números de identificação;
-- lê a aba `BASE_TAREFAS` da planilha: atualiza gênero e equipe de quem já existe e cria quem só
-  está na planilha;
-- só transforma as contagens da planilha em histórico quando não há banco antigo (`--xlsx` sozinho),
-  porque a planilha atual já soma as escalas do banco;
-- recusa rodar se o Neon já tiver voluntários. Para apagar tudo e importar de novo, use `--force`.
+O banco começa vazio: as tabelas são criadas pelo `npm run admin` (passo 4) e os voluntários são
+cadastrados pela tela **Voluntários**.
 
 ### 3. Site no Netlify
 
@@ -141,7 +124,7 @@ SMTP próprio (<https://neon.com/docs/auth/production-checklist>).
 ```bash
 npm install -g netlify-cli   # uma vez
 npm run dev                  # site + API em http://localhost:8888 (usa o app/web/.env.local)
-npm test                     # regras da escala, API e importação
+npm test                     # regras da escala e API
 npm run typecheck
 npm run build
 ```

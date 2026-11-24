@@ -4,10 +4,9 @@
  */
 import { beforeAll, describe, expect, it } from "vitest";
 import type { Accounts } from "./accounts.ts";
-import type { Sql } from "./db.ts";
+import { applySchema, type Sql } from "./db.ts";
 import { handle, type HandleOptions } from "./routes.ts";
 import { createTestDb, SCHEMA } from "./testdb.ts";
-import { applySchema } from "./importer.ts";
 import { UPGRADE } from "./upgrade.ts";
 
 const ADMIN = "admin@igreja.org";
