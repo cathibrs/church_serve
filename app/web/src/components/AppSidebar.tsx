@@ -12,6 +12,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   ScrollText,
+  Settings,
   Sun,
   Users,
   X,
@@ -20,6 +21,14 @@ import { href, prefetch, type Page, type Route } from "@/lib/screens";
 import type { Theme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { Tooltip } from "./ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
 
 const NAV: { id: Page; label: string; icon: React.ElementType; hint: string; adminOnly?: boolean }[] = [
   { id: "escala", label: "Escala", icon: CalendarRange, hint: "Mapa e ficha do culto" },
@@ -249,73 +258,94 @@ function SidebarBody({
       <div className="flex-1" />
 
       {/* rodapé */}
-      <div className={cn("flex flex-col gap-1", collapsed ? "items-center p-2" : "p-3")}>
-        {onToggle && (
-          <SideAction
-            collapsed={collapsed}
-            icon={collapsed ? PanelLeftOpen : PanelLeftClose}
-            label={collapsed ? "Expandir menu" : "Recolher menu"}
-            hint="Ctrl+B"
-            onClick={onToggle}
-          />
-        )}
-        <SideAction
+      <div className={cn("border-t border-sidebar-border", collapsed ? "flex justify-center p-2" : "px-3 py-2")}>
+        <SettingsMenu
           collapsed={collapsed}
-          icon={theme === "dark" ? Sun : Moon}
-          label={theme === "dark" ? "Tema claro" : "Tema escuro"}
-          onClick={onToggleTheme}
+          onToggle={onToggle}
+          theme={theme}
+          onToggleTheme={onToggleTheme}
+          onChangePassword={onChangePassword}
+          onSignOut={onSignOut}
+          userEmail={userEmail}
         />
-        <SideAction collapsed={collapsed} icon={Lock} label="Alterar senha" onClick={onChangePassword} />
-        <SideAction collapsed={collapsed} icon={LogOut} label="Sair" onClick={onSignOut} />
-        {!collapsed && (
-          <div className="mt-1 px-3 text-xs text-white/45">
-            <div className="truncate" title={userEmail}>
-              {userEmail}
-            </div>
-            Lagoinha Jundiaí · v3.0
-          </div>
-        )}
       </div>
     </>
   );
 }
 
-function SideAction({
+/** Configurações da conta e do menu, num item só para o rodapé não tomar a tela. */
+function SettingsMenu({
   collapsed,
-  icon: Icon,
-  label,
-  hint,
-  onClick,
+  onToggle,
+  theme,
+  onToggleTheme,
+  onChangePassword,
+  onSignOut,
+  userEmail,
 }: {
   collapsed: boolean;
-  icon: React.ElementType;
-  label: string;
-  hint?: string;
-  onClick: () => void;
+  onToggle?: () => void;
+  theme: Theme;
+  onToggleTheme: () => void;
+  onChangePassword: () => void;
+  onSignOut: () => void;
+  userEmail: string;
 }) {
-  const btn = (
-    <button
-      onClick={onClick}
-      aria-label={label}
+  const trigger = (
+    <DropdownMenuTrigger
+      aria-label="Configurações"
       className={cn(
-        "flex items-center rounded-lg text-sm text-white/80 transition-colors hover:bg-sidebar-accent hover:text-white",
-        collapsed ? "size-11 justify-center" : "w-full gap-3 px-3 py-2",
+        "flex items-center rounded-lg text-sm text-white/80 transition-colors outline-none hover:bg-sidebar-accent hover:text-white focus-visible:bg-sidebar-accent data-[state=open]:bg-sidebar-accent data-[state=open]:text-white",
+        collapsed ? "size-10 justify-center" : "w-full gap-3 px-3 py-1.5",
       )}
     >
-      <Icon className="size-[18px] shrink-0" />
-      {!collapsed && (
-        <>
-          <span className="whitespace-nowrap">{label}</span>
-          {hint && <kbd className="ml-auto rounded border border-white/20 px-1.5 text-xs text-white/55">{hint}</kbd>}
-        </>
-      )}
-    </button>
+      <Settings className="size-4 shrink-0" />
+      {!collapsed && <span className="whitespace-nowrap">Configurações</span>}
+    </DropdownMenuTrigger>
   );
-  return collapsed ? (
-    <Tooltip content={hint ? `${label} (${hint})` : label === "Sair" ? "Sair da conta" : label} side="right">
-      {btn}
-    </Tooltip>
-  ) : (
-    btn
+  return (
+    // não modal: "Alterar senha" abre outra janela logo em seguida, e as duas não brigam pelo foco
+    <DropdownMenu modal={false}>
+      {collapsed ? (
+        <Tooltip content="Configurações" side="right">
+          {trigger}
+        </Tooltip>
+      ) : (
+        trigger
+      )}
+      <DropdownMenuContent side={collapsed ? "right" : "top"} align="start" className="w-56">
+        <DropdownMenuLabel className="font-normal">
+          <div className="truncate font-medium text-foreground" title={userEmail}>
+            {userEmail}
+          </div>
+          Lagoinha Jundiaí · v3.0
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {/* trocar o tema mantém o menu aberto: dá para ver o resultado e voltar */}
+        <DropdownMenuItem
+          onSelect={(e) => {
+            e.preventDefault();
+            onToggleTheme();
+          }}
+        >
+          {theme === "dark" ? <Sun /> : <Moon />}
+          {theme === "dark" ? "Tema claro" : "Tema escuro"}
+        </DropdownMenuItem>
+        {onToggle && (
+          <DropdownMenuItem onSelect={onToggle}>
+            {collapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
+            {collapsed ? "Expandir menu" : "Recolher menu"}
+            <kbd className="ml-auto rounded border px-1.5 text-xs text-muted-foreground">Ctrl+B</kbd>
+          </DropdownMenuItem>
+        )}
+        <DropdownMenuItem onSelect={onChangePassword}>
+          <Lock /> Alterar senha
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={onSignOut}>
+          <LogOut /> Sair
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
