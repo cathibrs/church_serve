@@ -17,6 +17,7 @@ import { AcessosPage } from "@/pages/Acessos";
 import { AtividadePage } from "@/pages/Atividade";
 import { ChangePassword } from "@/components/ChangePassword";
 import { useTheme } from "@/lib/theme";
+import { markTutorialSeen, Tutorial, tutorialSeen } from "@/components/Tutorial";
 
 /** Como o endereço do navegador acompanha a troca de tela. */
 type Mode = "push" | "replace" | "pop";
@@ -28,6 +29,13 @@ export default function Shell({ me, first, onSignOut }: { me: Me; first: Screen;
   const [loading, setLoading] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
   const [theme, toggleTheme] = useTheme();
+  // primeira vez desta conta neste navegador: o tutorial abre sozinho
+  const [tutorial, setTutorial] = useState(() => !tutorialSeen(me.email));
+  const showTutorial = useCallback((open: boolean) => {
+    setTutorial(open);
+    if (!open) markTutorialSeen(me.email);
+  }, [me.email]);
+  const openTutorial = useCallback(() => setTutorial(true), []);
   const [collapsed, setCollapsed] = useState(() => {
     try {
       if (location.search.includes("menu=recolhido")) return true;
@@ -100,6 +108,7 @@ export default function Shell({ me, first, onSignOut }: { me: Me; first: Screen;
     onChangePassword: openPasswordChange,
     theme,
     onToggleTheme: toggleTheme,
+    onTutorial: openTutorial,
     userEmail: me.email,
     isAdmin,
   };
@@ -135,6 +144,7 @@ export default function Shell({ me, first, onSignOut }: { me: Me; first: Screen;
         </main>
       </div>
       <ChangePassword open={changingPassword} onOpenChange={setChangingPassword} />
+      <Tutorial me={me} open={tutorial} onOpenChange={showTutorial} />
       <Toaster theme={theme} position="bottom-right" richColors closeButton toastOptions={{ className: "text-sm" }} />
     </TooltipProvider>
   );

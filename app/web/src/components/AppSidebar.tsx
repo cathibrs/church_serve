@@ -3,6 +3,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { AnimatePresence, motion } from "motion/react";
 import {
   CalendarRange,
+  CircleHelp,
   History,
   KeyRound,
   Lock,
@@ -50,6 +51,8 @@ interface MenuProps {
   onChangePassword: () => void;
   theme: Theme;
   onToggleTheme: () => void;
+  /** abre o tutorial de novo */
+  onTutorial: () => void;
   userEmail: string;
   isAdmin: boolean;
 }
@@ -136,6 +139,7 @@ export function MobileNav(menu: MenuProps) {
             {...menu}
             onOpen={then(menu.onOpen)}
             onChangePassword={then(menu.onChangePassword)}
+            onTutorial={then(menu.onTutorial)}
             onSignOut={then(menu.onSignOut)}
             collapsed={false}
             activeId="nav-active-drawer"
@@ -154,6 +158,7 @@ function SidebarBody({
   onChangePassword,
   theme,
   onToggleTheme,
+  onTutorial,
   userEmail,
   isAdmin,
   collapsed,
@@ -265,6 +270,7 @@ function SidebarBody({
           theme={theme}
           onToggleTheme={onToggleTheme}
           onChangePassword={onChangePassword}
+          onTutorial={onTutorial}
           onSignOut={onSignOut}
           userEmail={userEmail}
         />
@@ -280,6 +286,7 @@ function SettingsMenu({
   theme,
   onToggleTheme,
   onChangePassword,
+  onTutorial,
   onSignOut,
   userEmail,
 }: {
@@ -288,6 +295,7 @@ function SettingsMenu({
   theme: Theme;
   onToggleTheme: () => void;
   onChangePassword: () => void;
+  onTutorial: () => void;
   onSignOut: () => void;
   userEmail: string;
 }) {
@@ -340,6 +348,9 @@ function SettingsMenu({
         )}
         <DropdownMenuItem onSelect={onChangePassword}>
           <Lock /> Alterar senha
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={onTutorial}>
+          <CircleHelp /> Como usar
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={onSignOut}>
